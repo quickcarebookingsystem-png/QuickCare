@@ -1,4 +1,4 @@
-<?php
+<?php  
 require_once __DIR__ . '/functions.php';
 app_header('QuickCare - Clinic Booking System');
 ?>
@@ -10,6 +10,25 @@ app_header('QuickCare - Clinic Booking System');
       <span>QuickCare</span>
     </a>
     <nav class="landing-nav" aria-label="Main navigation">
+      <a class="landing-link" href="index.php" draggable="false">Home</a>
+      <div class="landing-dropdown">
+        <a class="landing-link" href="doctors.php" draggable="false">About Us <span class="dropdown-arrow">▾</span></a>
+        <div class="landing-dropdown-content">
+          <a href="doctors.php" draggable="false">Our Doctors</a>
+        </div>
+      </div>
+      <div class="landing-dropdown">
+        <a class="landing-link" href="#services" draggable="false">Services <span class="dropdown-arrow">▾</span></a>
+        <div class="landing-dropdown-content">
+          <a href="#services" draggable="false">General Check-up</a>
+          <a href="#services" draggable="false">Dental Care</a>
+          <a href="#services" draggable="false">Eye Examination</a>
+          <a href="#services" draggable="false">Vaccination</a>
+          <a href="#services" draggable="false">Blood Test</a>
+          <a href="#services" draggable="false">Cardiology</a>
+        </div>
+      </div>
+      <a class="landing-link" href="#contact" draggable="false">Contact</a>
       <a class="btn btn-outline landing-nav-btn" href="login.php" draggable="false">Login</a>
       <a class="btn btn-primary landing-nav-btn" href="register.php" draggable="false">Register</a>
     </nav>
@@ -97,6 +116,39 @@ app_header('QuickCare - Clinic Booking System');
       <a class="btn btn-primary landing-cta-btn" href="register.php" draggable="false">Get Started</a>
     </section>
   </main>
+
+  <footer class="landing-footer">
+    <div class="footer-container">
+      <div class="footer-brand">
+        <a class="landing-brand" href="index.php" draggable="false">
+          <span class="logo-icon landing-logo-mark">🏥</span>
+          <span>QuickCare</span>
+        </a>
+        <p>Providing accessible healthcare through simplified appointment booking and modern management tools.</p>
+      </div>
+      <div class="footer-nav-col">
+        <h3>Quick Links</h3>
+        <a href="index.php" draggable="false">Home</a>
+        <a href="#about" draggable="false">About Us</a>
+        <a href="#services" draggable="false">Services</a>
+        <a href="#contact" draggable="false">Contact</a>
+      </div>
+      <div class="footer-nav-col">
+        <h3>Our Services</h3>
+        <a href="#services" draggable="false">General Check-up</a>
+        <a href="#services" draggable="false">Dental Care</a>
+        <a href="#services" draggable="false">Eye Examination</a>
+        <a href="#services" draggable="false">Vaccination</a>
+        <a href="#services" draggable="false">Blood Test</a>
+        <a href="#services" draggable="false">Cardiology</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; <?php echo date('Y'); ?> QuickCare Clinic. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <a href="#" class="back-to-top" title="Back to top">↑</a>
 </div>
 </body>
 </html>
