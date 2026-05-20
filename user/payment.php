@@ -3,517 +3,225 @@ require_once dirname(__DIR__) . '/functions.php';
 protect_page();
 app_header('QuickCare');
 app_start('user', 'payment');
+
+$user_id = $_SESSION['id'];
+$pending_payments = get_user_pending_payments($user_id);
 ?>
 
 <div class="checkout-container">
-    <!-- Progress Steps -->
-    <div class="progress-steps">
-        <div class="step" id="step1">
-            <div class="step-circle">1</div>
-            <div class="step-title">Select Payment</div>
+    <div class="qr-payment-section">
+        <div class="section-title">
+            <span class="section-icon">📱</span> QR Code Payment
         </div>
-        <div class="step" id="step2">
-            <div class="step-circle">2</div>
-            <div class="step-title">Choose Method</div>
-        </div>
-        <div class="step" id="step3">
-            <div class="step-circle">3</div>
-            <div class="step-title">Payment Details</div>
-        </div>
-        <div class="step" id="step4">
-            <div class="step-circle">4</div>
-            <div class="step-title">Confirmation</div>
-        </div>
-    </div>
 
-    <div class="checkout-layout">
-        <!-- Left Column - Payment Steps -->
-        <div class="payment-section">
-            <!-- Step 1: Select Payment -->
-            <div id="step1Content">
-                <div class="section-title">
-                    <span class="section-icon">💰</span> Select Payment to Settle
-                </div>
-                <div class="payment-items" id="paymentItems">
-                    <div class="payment-item" data-id="1" data-amount="52.00" data-name="General Check-up">
-                        <div class="payment-item-info">
-                            <h4>APT-0145 - General Check-up</h4>
-                            <p>Date: May 5, 2026 | Dr. Sarah Lim | 09:00 AM</p>
-                        </div>
-                        <div class="payment-item-amount">RM 52.00</div>
+        <!-- Step 1: Select Appointment -->
+        <div class="step-box">
+            <div class="step-number">1</div>
+            <div class="step-content">
+                <h3>Select Appointment</h3>
+                <?php if (empty($pending_payments)): ?>
+                    <div class="alert-info">
+                        <p>No pending payments. You don't have any approved appointments that need payment.</p>
+                        <a href="book_appointment.php" class="btn btn-primary" style="margin-top: 10px;">Book New Appointment</a>
                     </div>
-                    <div class="payment-item" data-id="2" data-amount="52.00" data-name="Blood Test">
-                        <div class="payment-item-info">
-                            <h4>APT-0142 - Blood Test</h4>
-                            <p>Date: May 4, 2026 | Dr. Sarah Lim | 02:00 PM</p>
-                        </div>
-                        <div class="payment-item-amount">RM 52.00</div>
-                    </div>
-                    <div class="payment-item" data-id="3" data-amount="82.00" data-name="Dental Care">
-                        <div class="payment-item-info">
-                            <h4>APT-0144 - Dental Care</h4>
-                            <p>Date: May 5, 2026 | Dr. Amir Hamzah | 09:30 AM</p>
-                        </div>
-                        <div class="payment-item-amount">RM 82.00</div>
-                    </div>
-                </div>
+                <?php else: ?>
+                    <select id="appointmentSelect" class="form-control" onchange="updateAmount()">
+                        <option value="">-- Select appointment --</option>
+                        <?php foreach ($pending_payments as $payment): ?>
+                        <option value="<?php echo htmlspecialchars($payment['appointment_code']); ?>" 
+                                data-amount="<?php echo $payment['amount']; ?>"
+                                data-name="<?php echo htmlspecialchars($payment['service_name']); ?>">
+                            <?php echo htmlspecialchars($payment['service_name']); ?> - 
+                            with Dr. <?php echo htmlspecialchars($payment['doctor_name']); ?> -
+                            RM <?php echo number_format($payment['amount'], 2); ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                <?php endif; ?>
             </div>
+        </div>
 
-            <!-- Step 2: Choose Payment Method -->
-            <div id="step2Content" style="display: none;">
-                <div class="section-title">
-                    <span class="section-icon">💳</span> Choose Payment Method
-                </div>
-                
-                <!-- Card Payments -->
-                <div style="margin-bottom: 24px;">
-                    <h4 style="margin-bottom: 12px; color: #64748b; font-size: 13px; letter-spacing: 0.5px;">💳 CARD</h4>
-                    <div class="payment-methods-grid">
-                        <div class="method-card" data-method="credit_card" data-type="card">
-                            <div class="radio-indicator"></div>
-                            <span class="method-icon">💳</span>
-                            <h4>Credit / Debit Card</h4>
-                            <p>Visa, Mastercard</p>
-                        </div>
+        <!-- Step 2: QR Code -->
+        <div class="step-box" id="qrStep" style="display: none;">
+            <div class="step-number">2</div>
+            <div class="step-content">
+                <h3>Scan QR Code to Pay</h3>
+                <div class="qr-container">
+                    <div class="qr-code">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=QUICKCARE-PAYMENT" 
+                             alt="QR Code" id="qrImage">
                     </div>
-                </div>
-
-                <!-- Online Banking -->
-                <div style="margin-bottom: 24px;">
-                    <h4 style="margin-bottom: 12px; color: #64748b; font-size: 13px; letter-spacing: 0.5px;">🏦 ONLINE BANKING</h4>
-                    <div class="payment-methods-grid">
-                        <div class="method-card" data-method="fpx" data-type="banking">
-                            <div class="radio-indicator"></div>
-                            <span class="method-icon">🏦</span>
-                            <h4>FPX</h4>
-                            <p>11 Malaysian Banks</p>
+                    <div class="payment-details">
+                        <div class="amount-display">
+                            Amount: <strong id="payAmount">RM 0.00</strong>
                         </div>
-                    </div>
-                </div>
-
-                <!-- E-Wallet Category -->
-                <div style="margin-bottom: 24px;">
-                    <h4 style="margin-bottom: 12px; color: #64748b; font-size: 13px; letter-spacing: 0.5px;">📱 E-WALLET</h4>
-                    <div class="payment-methods-grid">
-                        <div class="method-card" data-method="ewallet" data-type="ewallet_category">
-                            <div class="radio-indicator"></div>
-                            <span class="method-icon">📱</span>
-                            <h4>E-Wallet</h4>
-                            <p>GrabPay, ShopeePay, Touch 'n Go</p>
+                        <div class="bank-details">
+                            <p><strong>📱 DuitNow ID:</strong> 1234567890</p>
+                            <p><strong>📱 Touch 'n Go:</strong> 012-3456789</p>
+                            <p><strong>🏦 Bank Transfer:</strong> Maybank 1234-5678-9012</p>
+                            <p><strong>🏦 Account Name:</strong> QuickCare Clinic Sdn Bhd</p>
+                        </div>
+                        <div class="warning-note">
+                            ⚠️ After payment, please upload the receipt below for verification
                         </div>
                     </div>
                 </div>
             </div>
-
-            <!-- Step 3: Payment Details -->
-            <div id="step3Content" style="display: none;">
-                <div class="section-title">
-                    <span class="section-icon">✏️</span> Enter Payment Details
-                </div>
-                <div id="paymentDetailsForm"></div>
-            </div>
-
-            <!-- Step 4: Confirmation -->
-            <div id="step4Content" style="display: none;">
-                <div class="section-title">
-                    <span class="section-icon">✅</span> Confirm Payment
-                </div>
-                <div id="confirmationDetails"></div>
-                <button class="btn btn-primary" id="confirmPayBtn" style="margin-top: 20px; width: 100%;">Confirm & Pay</button>
-            </div>
-
-            <!-- Navigation Buttons -->
-            <div class="navigation-buttons">
-                <button class="btn btn-outline" id="prevBtn" onclick="goToPrevStep()" style="display: none;">← Back</button>
-                <button class="btn btn-primary" id="nextBtn" onclick="goToNextStep()">Next →</button>
-            </div>
         </div>
 
-        <!-- Right Column - Order Summary -->
-        <div class="order-summary">
-            <div class="section-title">
-                <span class="section-icon">📋</span> Order Summary
-            </div>
-            <div class="summary-content">
-                <div class="summary-row">
-                    <span>Selected Payment:</span>
-                    <span id="selectedPaymentName" class="summary-value">-</span>
-                </div>
-                <div class="summary-row">
-                    <span>Payment Method:</span>
-                    <span id="selectedMethodName" class="summary-value">-</span>
-                </div>
-                <div class="summary-divider"></div>
-                <div class="summary-total">
-                    <span>Total Amount:</span>
-                    <span id="totalAmount" class="total-value">RM 0.00</span>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- E-Wallet Selection Modal -->
-<div id="ewalletModal" class="modal-overlay" style="display: none;">
-    <div class="modal" style="max-width: 400px;">
-        <div class="modal-header">
-            <span class="modal-title">📱 Select E-Wallet</span>
-            <button class="modal-close" onclick="closeEwalletModal()">✕</button>
-        </div>
-        <div class="modal-body">
-            <div class="ewallet-options">
-                <div class="ewallet-option" data-ewallet="grabpay">
-                    <span class="ewallet-icon">🛵</span>
-                    <div class="ewallet-info">
-                        <h4>GrabPay</h4>
-                        <p>Pay with GrabPay eWallet</p>
+        <!-- Step 3: Upload Receipt -->
+        <div class="step-box" id="uploadStep" style="display: none;">
+            <div class="step-number">3</div>
+            <div class="step-content">
+                <h3>Upload Payment Receipt</h3>
+                <form id="paymentForm" enctype="multipart/form-data">
+                    <input type="hidden" id="appointmentId" name="appointment_id">
+                    <input type="hidden" id="amount" name="amount">
+                    
+                    <div class="form-group">
+                        <label>Upload Receipt/Screenshot</label>
+                        <input type="file" class="form-control" id="receipt" name="receipt" 
+                               accept="image/*,.pdf" required>
+                        <small class="text-muted">Format: JPG, PNG, PDF (Max 2MB)</small>
                     </div>
-                </div>
-                <div class="ewallet-option" data-ewallet="shopeepay">
-                    <span class="ewallet-icon">🛒</span>
-                    <div class="ewallet-info">
-                        <h4>ShopeePay</h4>
-                        <p>Pay with ShopeePay eWallet</p>
+                    
+                    <div class="form-group">
+                        <label>Remarks (Optional)</label>
+                        <textarea class="form-control" id="remarks" name="remarks" 
+                                  rows="2" placeholder="Any notes for admin..."></textarea>
                     </div>
-                </div>
-                <div class="ewallet-option" data-ewallet="tng">
-                    <span class="ewallet-icon">📲</span>
-                    <div class="ewallet-info">
-                        <h4>Touch 'n Go</h4>
-                        <p>Touch 'n Go eWallet</p>
-                    </div>
-                </div>
+                    
+                    <button type="submit" class="btn btn-primary">Submit Payment Verification</button>
+                </form>
             </div>
-        </div>
-    </div>
-</div>
-
-<!-- FPX Bank Selection Modal -->
-<div id="fpxModal" class="modal-overlay" style="display: none;">
-    <div class="modal" style="max-width: 500px;">
-        <div class="modal-header">
-            <span class="modal-title">🏦 Select Your Bank</span>
-            <button class="modal-close" onclick="closeFpxModal()">✕</button>
-        </div>
-        <div class="modal-body">
-            <div class="bank-list" id="fpxBankList"></div>
-        </div>
-    </div>
-</div>
-
-<!-- Success Modal -->
-<div id="successModal" class="modal-overlay" style="display: none;">
-    <div class="modal">
-        <div class="modal-header">
-            <span class="modal-title">✅ Payment Successful!</span>
-            <button class="modal-close" onclick="closeSuccessModal()">✕</button>
-        </div>
-        <div class="modal-body" style="text-align: center;">
-            <div style="font-size: 64px; margin-bottom: 20px;">✅</div>
-            <p><strong>Transaction ID:</strong> <span id="transactionId"></span></p>
-            <p><strong>Amount Paid:</strong> <span id="paidAmount"></span></p>
-            <p><strong>Payment Method:</strong> <span id="paymentMethodDisplay"></span></p>
-            <br>
-            <p>Thank you for your payment!</p>
-            <button class="btn btn-primary" onclick="location.reload()" style="margin-top: 20px;">Make Another Payment</button>
         </div>
     </div>
 </div>
 
 <style>
 .checkout-container {
-    max-width: 1200px;
+    max-width: 800px;
     margin: 0 auto;
+    padding: 20px;
 }
 
-/* Progress Steps */
-.progress-steps {
+.qr-payment-section {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+}
+
+.section-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border);
     display: flex;
-    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    color: var(--text);
+}
+
+.section-icon {
+    font-size: 24px;
+}
+
+/* Step Box - Horizontal layout (nombor di kiri, content di kanan) */
+.step-box {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 20px;
     margin-bottom: 30px;
-    background: white;
-    padding: 20px 30px;
-    border-radius: 12px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    position: relative;
+    padding: 20px;
+    background: var(--surface2);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
 }
 
-.progress-steps::before {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 80px;
-    right: 80px;
-    height: 2px;
-    background: #e2e8f0;
-    z-index: 1;
-}
-
-.step {
-    position: relative;
-    z-index: 2;
-    background: white;
-    text-align: center;
-    flex: 1;
-}
-
-.step-circle {
-    width: 36px;
-    height: 36px;
-    background: #e2e8f0;
+.step-number {
+    width: 40px;
+    height: 40px;
+    background: var(--primary);
+    color: white;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin: 0 auto 8px;
-    font-weight: 600;
-    color: #64748b;
-    transition: all 0.3s;
-}
-
-.step.active .step-circle {
-    background: #0d9488;
-    color: white;
-    box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.2);
-}
-
-.step.completed .step-circle {
-    background: #10b981;
-    color: white;
-}
-
-.step-title {
-    font-size: 13px;
-    font-weight: 500;
-    color: #64748b;
-}
-
-.step.active .step-title {
-    color: #0d9488;
-    font-weight: 600;
-}
-
-.step.completed .step-title {
-    color: #10b981;
-}
-
-/* Layout */
-.checkout-layout {
-    display: grid;
-    grid-template-columns: 1fr 340px;
-    gap: 24px;
-}
-
-.payment-section {
-    background: white;
-    border-radius: 12px;
-    padding: 24px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}
-
-.order-summary {
-    background: white;
-    border-radius: 12px;
-    padding: 24px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    height: fit-content;
-    position: sticky;
-    top: 20px;
-}
-
-.section-title {
+    font-weight: bold;
     font-size: 18px;
-    font-weight: 600;
-    margin-bottom: 20px;
-    padding-bottom: 12px;
-    border-bottom: 2px solid #f1f5f9;
+    flex-shrink: 0;
+}
+
+.step-content {
+    flex: 1;
+}
+
+.step-content h3 {
+    margin-bottom: 15px;
+    color: var(--text);
+    font-size: 18px;
+    margin-top: 0;
+}
+
+.qr-container {
     display: flex;
+    gap: 30px;
     align-items: center;
-    gap: 10px;
+    flex-wrap: wrap;
 }
 
-.section-icon {
-    font-size: 20px;
-}
-
-/* Payment Items */
-.payment-items {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.payment-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.payment-item:hover {
-    border-color: #0d9488;
-    background: #f0fdfa;
-}
-
-.payment-item.selected {
-    border-color: #0d9488;
-    background: #f0fdfa;
-}
-
-.payment-item-info h4 {
-    font-size: 15px;
-    font-weight: 600;
-    margin-bottom: 4px;
-    color: #1e293b;
-}
-
-.payment-item-info p {
-    font-size: 12px;
-    color: #64748b;
-    margin-bottom: 0;
-}
-
-.payment-item-amount {
-    font-size: 16px;
-    font-weight: 700;
-    color: #0d9488;
-}
-
-/* Payment Methods Grid */
-.payment-methods-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-}
-
-.method-card {
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 16px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.2s;
-    position: relative;
-}
-
-.method-card:hover {
-    border-color: #0d9488;
-    background: #f0fdfa;
-}
-
-.method-card.selected {
-    border-color: #0d9488;
-    background: #f0fdfa;
-}
-
-.method-icon {
-    font-size: 28px;
-    display: block;
-    margin-bottom: 8px;
-}
-
-.method-card h4 {
-    font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 4px;
-    color: #1e293b;
-}
-
-.method-card p {
-    font-size: 11px;
-    color: #64748b;
-}
-
-.radio-indicator {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    width: 16px;
-    height: 16px;
-    border: 2px solid #cbd5e1;
-    border-radius: 50%;
-}
-
-.method-card.selected .radio-indicator {
-    border-color: #0d9488;
-    background: #0d9488;
-    box-shadow: inset 0 0 0 3px white;
-}
-
-/* E-Wallet Options */
-.ewallet-options {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.ewallet-option {
-    display: flex;
-    align-items: center;
-    gap: 15px;
+.qr-code {
+    background: white;
     padding: 15px;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.ewallet-option:hover {
-    border-color: #0d9488;
-    background: #f0fdfa;
-}
-
-.ewallet-icon {
-    font-size: 32px;
-}
-
-.ewallet-info h4 {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 4px;
-    color: #1e293b;
-}
-
-.ewallet-info p {
-    font-size: 12px;
-    color: #64748b;
-}
-
-/* Bank List */
-.bank-list {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-.bank-option {
-    padding: 12px;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    cursor: pointer;
+    border-radius: 12px;
     text-align: center;
+    border: 1px solid var(--border);
+}
+
+.qr-code img {
+    width: 200px;
+    height: 200px;
+}
+
+.payment-details {
+    flex: 1;
+}
+
+.amount-display {
+    font-size: 20px;
+    margin-bottom: 15px;
+    padding: 10px;
+    background: rgba(124,51,73,0.1);
+    border-radius: 8px;
+    text-align: center;
+    color: var(--primary);
+}
+
+.bank-details {
+    background: var(--surface);
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    border: 1px solid var(--border);
+}
+
+.bank-details p {
+    margin: 8px 0;
     font-size: 14px;
-    transition: all 0.2s;
 }
 
-.bank-option:hover {
-    border-color: #0d9488;
-    background: #f0fdfa;
+.warning-note {
+    background: #fef3c7;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #92400e;
 }
 
-.bank-option.selected {
-    background: #0d9488;
-    color: white;
-    border-color: #0d9488;
-}
-
-/* Forms */
 .form-group {
     margin-bottom: 20px;
 }
@@ -522,642 +230,113 @@ app_start('user', 'payment');
     display: block;
     margin-bottom: 8px;
     font-weight: 500;
-    color: #334155;
-    font-size: 14px;
+    color: var(--text);
 }
 
 .form-control {
     width: 100%;
     padding: 10px 12px;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     font-size: 14px;
-    transition: all 0.2s;
+    background: var(--surface);
+    color: var(--text);
 }
 
 .form-control:focus {
     outline: none;
-    border-color: #0d9488;
-    box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
-}
-
-.form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-}
-
-/* Navigation Buttons */
-.navigation-buttons {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 30px;
-    padding-top: 20px;
-    border-top: 1px solid #f1f5f9;
-}
-
-.btn {
-    padding: 10px 24px;
-    border-radius: 8px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
-    font-size: 14px;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(124,51,73,0.1);
 }
 
 .btn-primary {
-    background: #0d9488;
+    background: var(--primary);
     color: white;
     border: none;
+    padding: 12px 24px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-weight: 600;
+    width: 100%;
 }
 
 .btn-primary:hover {
-    background: #0f766e;
-    transform: translateY(-1px);
+    background: var(--primary-dark);
 }
 
-.btn-outline {
-    background: transparent;
-    border: 1px solid #e2e8f0;
-    color: #64748b;
-}
-
-.btn-outline:hover {
-    border-color: #0d9488;
-    color: #0d9488;
-}
-
-/* Order Summary */
-.summary-content {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.summary-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: 14px;
-    color: #64748b;
-}
-
-.summary-value {
-    color: #1e293b;
-    font-weight: 500;
-}
-
-.summary-divider {
-    height: 1px;
-    background: #f1f5f9;
-    margin: 8px 0;
-}
-
-.summary-total {
-    display: flex;
-    justify-content: space-between;
-    font-size: 16px;
-    font-weight: 700;
-    color: #1e293b;
-}
-
-.total-value {
-    color: #0d9488;
-    font-size: 18px;
-}
-
-/* Confirmation Box */
-.confirmation-box {
-    background: #f8fafc;
+.alert-info {
+    background: #dbeafe;
     padding: 20px;
-    border-radius: 10px;
+    border-radius: 8px;
+    text-align: center;
+    color: #1e40af;
 }
 
-.confirmation-row {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 12px;
-    font-size: 14px;
+.text-muted {
+    color: var(--text-muted);
+    font-size: 12px;
 }
 
-.confirmation-label {
-    color: #64748b;
-}
-
-.confirmation-value {
-    font-weight: 500;
-    color: #1e293b;
-}
-
-/* Modal */
-.modal-overlay {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0,0,0,0.5);
-    z-index: 1000;
-    justify-content: center;
-    align-items: center;
-}
-
-.modal {
-    background: white;
-    border-radius: 12px;
-    width: 90%;
-    max-width: 500px;
-    max-height: 80vh;
-    overflow-y: auto;
-    animation: slideIn 0.3s;
-}
-
-@keyframes slideIn {
-    from { transform: translateY(-50px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-}
-
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    border-bottom: 1px solid #e2e8f0;
-}
-
-.modal-title {
-    font-size: 18px;
-    font-weight: 600;
-}
-
-.modal-close {
-    font-size: 24px;
-    cursor: pointer;
-    background: none;
-    border: none;
-}
-
-.modal-body {
-    padding: 20px;
-}
-
-/* Responsive */
+/* Responsive: pada mobile, tukar kepada column */
 @media (max-width: 768px) {
-    .checkout-layout {
-        grid-template-columns: 1fr;
+    .step-box {
+        flex-direction: column;
+        align-items: flex-start;
     }
     
-    .progress-steps::before {
-        left: 40px;
-        right: 40px;
-    }
-    
-    .payment-methods-grid {
-        grid-template-columns: 1fr;
+    .qr-container {
+        flex-direction: column;
     }
 }
 </style>
 
 <script>
-// State variables
-let currentStep = 1;
-let selectedPaymentId = null;
-let selectedPaymentAmount = null;
-let selectedPaymentName = null;
-let selectedMethod = null;
-let selectedEwallet = null;
-let selectedBank = null;
-
-// Method names mapping
-const methodNames = {
-    'credit_card': 'Credit/Debit Card',
-    'fpx': 'FPX - Online Banking',
-    'grabpay': 'GrabPay',
-    'shopeepay': 'ShopeePay',
-    'tng': 'Touch n Go'
-};
-
-// Method icons
-const methodIcons = {
-    'credit_card': '💳',
-    'fpx': '🏦',
-    'grabpay': '🛵',
-    'shopeepay': '🛒',
-    'tng': '📲'
-};
-
-// FPX Banks
-const fpxBanks = ['Maybank', 'CIMB Bank', 'Public Bank', 'RHB Bank', 'Hong Leong Bank', 'AmBank', 'Bank Islam', 'Bank Rakyat', 'Affin Bank', 'UOB Bank', 'OCBC Bank'];
-
-// Initialize
-document.addEventListener('DOMContentLoaded', function() {
-    const firstPayment = document.querySelector('.payment-item');
-    if (firstPayment) {
-        firstPayment.click();
-    }
-});
-
-// Step 1: Select Payment
-document.querySelectorAll('.payment-item').forEach(item => {
-    item.addEventListener('click', function() {
-        document.querySelectorAll('.payment-item').forEach(i => i.classList.remove('selected'));
-        this.classList.add('selected');
-        selectedPaymentId = this.dataset.id;
-        selectedPaymentAmount = parseFloat(this.dataset.amount);
-        selectedPaymentName = this.querySelector('h4').innerText;
-        updateOrderSummary();
-    });
-});
-
-// Step 2: Select Payment Method
-function attachMethodListeners() {
-    document.querySelectorAll('.method-card').forEach(card => {
-        card.addEventListener('click', function() {
-            const method = this.dataset.method;
-            const type = this.dataset.type;
-            
-            if (type === 'ewallet_category') {
-                // Show e-wallet selection modal
-                showEwalletModal();
-            } else if (method === 'fpx') {
-                // Show FPX bank selection modal
-                showFpxModal();
-            } else {
-                // Regular method selection
-                document.querySelectorAll('.method-card').forEach(c => c.classList.remove('selected'));
-                this.classList.add('selected');
-                selectedMethod = method;
-                selectedEwallet = null;
-                selectedBank = null;
-                updateOrderSummary();
-            }
-        });
-    });
-}
-
-// Show E-Wallet Modal
-function showEwalletModal() {
-    const modal = document.getElementById('ewalletModal');
-    modal.style.display = 'flex';
+function updateAmount() {
+    const select = document.getElementById('appointmentSelect');
+    const selectedOption = select.options[select.selectedIndex];
+    const amount = selectedOption.dataset.amount;
+    const appointmentId = selectedOption.value;
     
-    document.querySelectorAll('.ewallet-option').forEach(option => {
-        option.addEventListener('click', function() {
-            const ewallet = this.dataset.ewallet;
-            selectedMethod = ewallet;
-            selectedEwallet = ewallet;
-            
-            // Update the selected method card
-            document.querySelectorAll('.method-card').forEach(c => c.classList.remove('selected'));
-            const ewalletCard = document.querySelector('.method-card[data-method="ewallet"]');
-            if (ewalletCard) {
-                ewalletCard.classList.add('selected');
-                // Update the card text to show selected e-wallet
-                const cardTitle = ewalletCard.querySelector('h4');
-                if (cardTitle) {
-                    cardTitle.innerHTML = `${methodIcons[ewallet]} ${methodNames[ewallet]}`;
-                }
-            }
-            
-            updateOrderSummary();
-            closeEwalletModal();
-        });
-    });
-}
-
-function closeEwalletModal() {
-    document.getElementById('ewalletModal').style.display = 'none';
-}
-
-// Show FPX Modal
-function showFpxModal() {
-    const modal = document.getElementById('fpxModal');
-    const bankList = document.getElementById('fpxBankList');
-    
-    // Populate banks
-    bankList.innerHTML = fpxBanks.map(bank => `
-        <div class="bank-option" data-bank="${bank}">${bank}</div>
-    `).join('');
-    
-    modal.style.display = 'flex';
-    
-    document.querySelectorAll('.bank-option').forEach(option => {
-        option.addEventListener('click', function() {
-            selectedBank = this.dataset.bank;
-            selectedMethod = 'fpx';
-            
-            // Update the selected method card
-            document.querySelectorAll('.method-card').forEach(c => c.classList.remove('selected'));
-            const fpxCard = document.querySelector('.method-card[data-method="fpx"]');
-            if (fpxCard) {
-                fpxCard.classList.add('selected');
-                // Update the card text to show selected bank
-                const cardTitle = fpxCard.querySelector('h4');
-                if (cardTitle) {
-                    cardTitle.innerHTML = `🏦 ${selectedBank}`;
-                }
-                const cardDesc = fpxCard.querySelector('p');
-                if (cardDesc) {
-                    cardDesc.innerHTML = 'Online Banking';
-                }
-            }
-            
-            updateOrderSummary();
-            closeFpxModal();
-        });
-    });
-}
-
-function closeFpxModal() {
-    document.getElementById('fpxModal').style.display = 'none';
-}
-
-// Step 3: Load payment details form
-function loadPaymentDetailsForm() {
-    const container = document.getElementById('paymentDetailsForm');
-    let formHtml = '';
-    
-    switch(selectedMethod) {
-        case 'credit_card':
-            formHtml = `
-                <form id="detailsForm">
-                    <div class="form-group">
-                        <label>Card Number</label>
-                        <input type="text" class="form-control" id="cardNumber" placeholder="1234 5678 9012 3456" maxlength="19" required>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Expiry Date</label>
-                            <input type="text" class="form-control" id="expiry" placeholder="MM/YY" maxlength="5" required>
-                        </div>
-                        <div class="form-group">
-                            <label>CVV</label>
-                            <input type="password" class="form-control" id="cvv" placeholder="123" maxlength="4" required>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Cardholder Name</label>
-                        <input type="text" class="form-control" id="cardholderName" placeholder="Name on card" required>
-                    </div>
-                </form>
-            `;
-            break;
-            
-        case 'fpx':
-            formHtml = `
-                <form id="detailsForm">
-                    <div class="form-group">
-                        <label>Bank</label>
-                        <input type="text" class="form-control" value="${selectedBank}" disabled style="background: #f8fafc;">
-                    </div>
-                    <div class="form-group">
-                        <label>Account Number</label>
-                        <input type="text" class="form-control" placeholder="Enter your account number" required>
-                    </div>
-                    <div class="form-group">
-                        <label>ID Number (IC/Passport)</label>
-                        <input type="text" class="form-control" placeholder="Enter your IC number" required>
-                    </div>
-                </form>
-            `;
-            break;
-            
-        case 'grabpay':
-            formHtml = `
-                <form id="detailsForm">
-                    <div class="form-group">
-                        <label>GrabPay Registered Mobile Number</label>
-                        <input type="tel" class="form-control" placeholder="0123456789" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Email Address</label>
-                        <input type="email" class="form-control" placeholder="your@email.com" required>
-                    </div>
-                </form>
-            `;
-            break;
-            
-        case 'shopeepay':
-            formHtml = `
-                <form id="detailsForm">
-                    <div class="form-group">
-                        <label>ShopeePay Mobile Number</label>
-                        <input type="tel" class="form-control" placeholder="0123456789" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Shopee Username</label>
-                        <input type="text" class="form-control" placeholder="Your Shopee username" required>
-                    </div>
-                </form>
-            `;
-            break;
-            
-        case 'tng':
-            formHtml = `
-                <form id="detailsForm">
-                    <div class="form-group">
-                        <label>Touch 'n Go Mobile Number</label>
-                        <input type="tel" class="form-control" placeholder="0123456789" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Email Address</label>
-                        <input type="email" class="form-control" placeholder="your@email.com" required>
-                    </div>
-                </form>
-            `;
-            break;
-    }
-    
-    container.innerHTML = formHtml;
-}
-
-// Load confirmation details
-function loadConfirmationDetails() {
-    const container = document.getElementById('confirmationDetails');
-    let paymentDetailText = '';
-    let methodDisplayName = '';
-    
-    if (selectedMethod === 'fpx') {
-        methodDisplayName = `FPX - ${selectedBank}`;
-        paymentDetailText = `Bank: ${selectedBank}`;
-    } else if (selectedMethod === 'grabpay') {
-        methodDisplayName = 'GrabPay';
-        paymentDetailText = `E-Wallet: GrabPay`;
-    } else if (selectedMethod === 'shopeepay') {
-        methodDisplayName = 'ShopeePay';
-        paymentDetailText = `E-Wallet: ShopeePay`;
-    } else if (selectedMethod === 'tng') {
-        methodDisplayName = 'Touch n Go';
-        paymentDetailText = `E-Wallet: Touch n Go`;
+    if (appointmentId) {
+        document.getElementById('payAmount').innerHTML = 'RM ' + parseFloat(amount).toFixed(2);
+        document.getElementById('appointmentId').value = appointmentId;
+        document.getElementById('amount').value = amount;
+        
+        const qrData = `QUICKCARE-PAYMENT-${appointmentId}-RM${amount}`;
+        document.getElementById('qrImage').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrData)}`;
+        
+        document.getElementById('qrStep').style.display = 'flex';
+        document.getElementById('uploadStep').style.display = 'flex';
     } else {
-        methodDisplayName = methodNames[selectedMethod];
-        paymentDetailText = 'Card payment';
-    }
-    
-    container.innerHTML = `
-        <div class="confirmation-box">
-            <div class="confirmation-row">
-                <span class="confirmation-label">Appointment:</span>
-                <span class="confirmation-value">${selectedPaymentName}</span>
-            </div>
-            <div class="confirmation-row">
-                <span class="confirmation-label">Payment Method:</span>
-                <span class="confirmation-value">${methodDisplayName}</span>
-            </div>
-            <div class="confirmation-row">
-                <span class="confirmation-label">Payment Details:</span>
-                <span class="confirmation-value">${paymentDetailText}</span>
-            </div>
-            <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
-                <div class="confirmation-row">
-                    <span class="confirmation-label"><strong>Total Amount:</strong></span>
-                    <span class="confirmation-value" style="color: #0d9488; font-size: 18px; font-weight: 700;">RM ${selectedPaymentAmount.toFixed(2)}</span>
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-// Update order summary
-function updateOrderSummary() {
-    if (selectedPaymentName) {
-        document.getElementById('selectedPaymentName').innerHTML = selectedPaymentName;
-    }
-    
-    let methodDisplay = '';
-    if (selectedMethod === 'fpx' && selectedBank) {
-        methodDisplay = `🏦 FPX - ${selectedBank}`;
-    } else if (selectedMethod === 'grabpay') {
-        methodDisplay = `🛵 GrabPay`;
-    } else if (selectedMethod === 'shopeepay') {
-        methodDisplay = `🛒 ShopeePay`;
-    } else if (selectedMethod === 'tng') {
-        methodDisplay = `📲 Touch n Go`;
-    } else if (selectedMethod === 'credit_card') {
-        methodDisplay = `💳 Credit/Debit Card`;
-    }
-    
-    if (methodDisplay) {
-        document.getElementById('selectedMethodName').innerHTML = methodDisplay;
-    }
-    
-    if (selectedPaymentAmount) {
-        document.getElementById('totalAmount').innerHTML = `RM ${selectedPaymentAmount.toFixed(2)}`;
+        document.getElementById('qrStep').style.display = 'none';
+        document.getElementById('uploadStep').style.display = 'none';
     }
 }
 
-// Navigation functions
-function goToNextStep() {
-    if (currentStep === 1 && !selectedPaymentId) {
-        alert('Please select a payment to proceed');
-        return;
-    }
-    if (currentStep === 2 && !selectedMethod) {
-        alert('Please select a payment method');
-        return;
-    }
-    if (currentStep === 3) {
-        const form = document.getElementById('detailsForm');
-        if (form && !form.checkValidity()) {
-            form.reportValidity();
-            return;
-        }
-    }
+// Handle form submission
+document.getElementById('paymentForm')?.addEventListener('submit', async function(e) {
+    e.preventDefault();
     
-    document.getElementById(`step${currentStep}Content`).style.display = 'none';
-    currentStep++;
-    document.getElementById(`step${currentStep}Content`).style.display = 'block';
-    updateProgressSteps();
+    const formData = new FormData();
+    formData.append('action', 'submit_payment');
+    formData.append('appointment_id', document.getElementById('appointmentId').value);
+    formData.append('amount', document.getElementById('amount').value);
+    formData.append('remarks', document.getElementById('remarks').value);
+    formData.append('receipt', document.getElementById('receipt').files[0]);
     
-    document.getElementById('prevBtn').style.display = currentStep > 1 ? 'inline-flex' : 'none';
-    document.getElementById('nextBtn').innerHTML = currentStep === 4 ? 'Review Payment' : 'Next →';
+    const response = await fetch('../action.php', {
+        method: 'POST',
+        body: formData
+    });
     
-    if (currentStep === 2) attachMethodListeners();
-    if (currentStep === 3) loadPaymentDetailsForm();
-    if (currentStep === 4) {
-        loadConfirmationDetails();
-        document.getElementById('nextBtn').style.display = 'none';
-        document.getElementById('confirmPayBtn').style.display = 'block';
-    }
-}
-
-function goToPrevStep() {
-    document.getElementById(`step${currentStep}Content`).style.display = 'none';
-    currentStep--;
-    document.getElementById(`step${currentStep}Content`).style.display = 'block';
-    updateProgressSteps();
+    const result = await response.json();
     
-    document.getElementById('prevBtn').style.display = currentStep > 1 ? 'inline-flex' : 'none';
-    document.getElementById('nextBtn').style.display = 'inline-flex';
-    document.getElementById('confirmPayBtn').style.display = 'none';
-    document.getElementById('nextBtn').innerHTML = 'Next →';
-}
-
-function updateProgressSteps() {
-    for (let i = 1; i <= 4; i++) {
-        const step = document.getElementById(`step${i}`);
-        step.classList.remove('active', 'completed');
-        if (i < currentStep) {
-            step.classList.add('completed');
-            step.querySelector('.step-circle').innerHTML = '✓';
-        } else if (i === currentStep) {
-            step.classList.add('active');
-            step.querySelector('.step-circle').innerHTML = i;
-        } else {
-            step.querySelector('.step-circle').innerHTML = i;
-        }
-    }
-}
-
-// Process payment
-function processPayment() {
-    const transactionId = 'TXN' + Date.now() + Math.floor(Math.random() * 1000);
-    
-    let methodDisplay = '';
-    if (selectedMethod === 'fpx' && selectedBank) {
-        methodDisplay = `FPX - ${selectedBank}`;
-    } else if (selectedMethod === 'grabpay') {
-        methodDisplay = 'GrabPay';
-    } else if (selectedMethod === 'shopeepay') {
-        methodDisplay = 'ShopeePay';
-    } else if (selectedMethod === 'tng') {
-        methodDisplay = 'Touch n Go';
+    if (result.success) {
+        alert('Payment submitted! Waiting for admin approval.');
+        window.location.reload();
     } else {
-        methodDisplay = methodNames[selectedMethod];
+        alert('Error: ' + result.message);
     }
-    
-    document.getElementById('transactionId').innerText = transactionId;
-    document.getElementById('paidAmount').innerText = `RM ${selectedPaymentAmount.toFixed(2)}`;
-    document.getElementById('paymentMethodDisplay').innerHTML = methodDisplay;
-    document.getElementById('successModal').style.display = 'flex';
-}
-
-function closeSuccessModal() {
-    document.getElementById('successModal').style.display = 'none';
-    location.reload();
-}
-
-// Attach confirm button
-document.getElementById('confirmPayBtn')?.addEventListener('click', processPayment);
-
-// Format card number
-function formatCardNumber(input) {
-    let value = input.value.replace(/\s/g, '');
-    if (value.length > 16) value = value.slice(0, 16);
-    let formatted = value.match(/.{1,4}/g)?.join(' ') || value;
-    input.value = formatted;
-}
-
-function formatExpiry(input) {
-    let value = input.value.replace('/', '');
-    if (value.length >= 2) {
-        value = value.slice(0,2) + '/' + value.slice(2);
-    }
-    input.value = value;
-}
-
-document.addEventListener('input', function(e) {
-    if (e.target && e.target.id === 'cardNumber') formatCardNumber(e.target);
-    if (e.target && e.target.id === 'expiry') formatExpiry(e.target);
 });
 </script>
 
