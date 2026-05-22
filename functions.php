@@ -706,7 +706,7 @@ function render_appointments($role) {
     global $conn;
     $appointments = get_appointments($conn, $role);
 
-    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">Search</span><input class="form-control" type="text" placeholder="Search appointments..." id="searchAppointment"></div><div class="filter-group"><input class="form-control" type="date" id="filterDate" style="width:160px"><select class="filter-select" id="filterStatus"><option value="">All Status</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="completed">Completed</option><option value="unpaid">Unpaid</option><option value="paid">Paid</option><option value="rejected">Rejected</option></select></div>';
+    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search appointments..." id="searchAppointment"></div><div class="filter-group"><input class="form-control" type="date" id="filterDate" style="width:160px"><select class="filter-select" id="filterStatus"><option value="">All Status</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="completed">Completed</option><option value="unpaid">Unpaid</option><option value="paid">Paid</option><option value="rejected">Rejected</option></select></div>';
     if ($role === 'admin') echo '<a class="btn btn-outline" href="' . e(action_url('export_report')) . '">Export</a>';
     echo '</div><div class="card"><div class="card-body" style="padding:0; overflow-x:auto"><table class="appointments-table" style="width:100%; border-collapse:collapse; min-width:900px"><thead><tr><th>ID</th><th>User</th><th>Doctor</th><th>Service</th><th>Date</th><th>Time</th><th>Appointment</th><th>Payment</th><th>Actions</th></tr></thead><tbody id="appointmentsTableBody">';
 
@@ -742,7 +742,7 @@ function render_appointments($role) {
     </script>';
 }
 
-function render_book() {
+function render_book_legacy() {
     global $conn;
     $services = get_services($conn);
     $doctors = get_doctors($conn);
@@ -751,6 +751,258 @@ function render_book() {
     echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Choose Doctor</span></div><div class="card-body"><div class="doctor-grid">';
     foreach ($doctors as $d) echo '<label class="doctor-card"><input type="radio" name="doctor" value="' . e($d['doctor_name']) . '" required><div class="doctor-avatar">' . e($d['doctor_icon']) . '</div><div class="doctor-name">' . e($d['doctor_name']) . '</div><div class="doctor-spec">' . e($d['doctor_specialist']) . '</div><div class="doctor-avail">Available ' . e($d['available_days'] ?: 'Not scheduled') . '</div></label>';
     echo '</div></div></div></div><div class="card mt-20"><div class="card-header"><span class="card-title">Date, Time & Notes</span></div><div class="card-body"><div class="grid-2"><div class="form-group"><label>Date</label><input class="form-control" type="date" name="date" required></div><div class="form-group"><label>Time</label><select class="form-control" name="time" required><option>09:00</option><option>09:30</option><option>10:00</option><option>10:30</option><option>11:00</option><option>14:00</option></select></div></div><div class="form-group"><label>Symptoms / Notes</label><textarea class="form-control" rows="5" name="notes" placeholder="e.g. Fever for 3 days, headache…"></textarea></div><button class="btn btn-primary" style="width:auto">Confirm Appointment</button></div></div></form>';
+}
+
+function render_book() {
+    global $conn;
+    $services = get_services($conn);
+    $doctors = get_doctors($conn);
+    $today = date('Y-m-d');
+    $timeSlots = ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','14:00','14:30','15:00','15:30','16:00','16:30'];
+    $unavailableSlots = ['09:00', '10:30', '14:30'];
+
+    echo '<form id="bookingWizardForm" class="booking-wizard" method="post" action="' . e(app_url('action.php')) . '">';
+    echo '<input type="hidden" name="action" value="book_appointment">';
+    echo '<input type="hidden" name="service" id="selectedServiceInput" value="">';
+    echo '<input type="hidden" name="doctor" id="selectedDoctorInput" value="">';
+    echo '<input type="hidden" name="time" id="selectedTimeInput" value="">';
+
+    echo '<div class="booking-steps">';
+    echo '<div class="booking-step active" data-step="1"><span class="step-num">1</span><span class="step-label">Select Service</span></div>';
+    echo '<div class="booking-step" data-step="2"><span class="step-num">2</span><span class="step-label">Choose Doctor</span></div>';
+    echo '<div class="booking-step" data-step="3"><span class="step-num">3</span><span class="step-label">Date &amp; Time</span></div>';
+    echo '<div class="booking-step" data-step="4"><span class="step-num">4</span><span class="step-label">Confirm</span></div>';
+    echo '</div>';
+
+    echo '<section class="booking-panel active" data-panel="1">';
+    echo '<h2 class="booking-section-title">Select a Service</h2>';
+    echo '<div class="book-service-grid">';
+    foreach ($services as $s) {
+        $price = (float) ($s['service_price'] ?? 0);
+        $priceText = rtrim(rtrim(number_format($price, 2, '.', ''), '0'), '.');
+        if ($priceText === '') {
+            $priceText = '0';
+        }
+        echo '<button type="button" class="book-service-card js-select-service" data-service-name="' . e($s['service_name']) . '" data-service-price="' . e($priceText) . '" data-service-description="' . e($s['service_description']) . '">';
+        echo '<span class="service-icon">' . e($s['service_icon']) . '</span>';
+        echo '<div class="service-name">' . e($s['service_name']) . '</div>';
+        echo '<div class="service-price">RM ' . e($priceText) . '</div>';
+        echo '<div class="service-desc">' . e($s['service_description']) . '</div>';
+        echo '</button>';
+    }
+    echo '</div>';
+    echo '<div class="book-nav book-nav-right"><button type="button" class="btn btn-primary js-next-step" data-next-step="2">Next: Choose Doctor &rarr;</button></div>';
+    echo '</section>';
+
+    echo '<section class="booking-panel" data-panel="2">';
+    echo '<h2 class="booking-section-title">Choose a Doctor</h2>';
+    echo '<div class="book-doctor-grid">';
+    foreach ($doctors as $d) {
+        $availableDays = $d['available_days'] ?: 'Not scheduled';
+        echo '<button type="button" class="book-doctor-card js-select-doctor" data-doctor-name="' . e($d['doctor_name']) . '" data-doctor-specialist="' . e($d['doctor_specialist']) . '">';
+        echo '<div class="doctor-avatar">' . e($d['doctor_icon']) . '</div>';
+        echo '<div class="doctor-name">' . e($d['doctor_name']) . '</div>';
+        echo '<div class="doctor-spec">' . e($d['doctor_specialist']) . '</div>';
+        echo '<div class="doctor-avail">&#9989; ' . e($availableDays) . '</div>';
+        echo '</button>';
+    }
+    echo '</div>';
+    echo '<div class="book-nav"><button type="button" class="btn btn-outline js-back-step" data-back-step="1">&larr; Back</button><button type="button" class="btn btn-primary js-next-step" data-next-step="3">Next: Date &amp; Time &rarr;</button></div>';
+    echo '</section>';
+
+    echo '<section class="booking-panel" data-panel="3">';
+    echo '<div class="book-step3-grid">';
+    echo '<div><h2 class="booking-section-title">Select Date</h2><div class="form-group"><input class="form-control booking-date-input" id="bookingDateInput" type="date" name="date" min="' . e($today) . '" required></div>';
+    echo '<h2 class="booking-section-title booking-subtitle">Available Time Slots</h2>';
+    echo '<div class="book-time-grid">';
+    foreach ($timeSlots as $slot) {
+        $isUnavailable = in_array($slot, $unavailableSlots, true);
+        echo '<button type="button" class="book-time-slot js-time-slot' . ($isUnavailable ? ' unavailable' : '') . '" data-time="' . e($slot) . '"' . ($isUnavailable ? ' disabled' : '') . '>' . e($slot) . '</button>';
+    }
+    echo '</div></div>';
+    echo '<div class="book-summary-card"><h3>Your Selection</h3><div class="book-summary-list">';
+    echo '<div class="book-summary-row"><span>Service</span><strong id="summaryServiceStep3">-</strong></div>';
+    echo '<div class="book-summary-row"><span>Doctor</span><strong id="summaryDoctorStep3">-</strong></div>';
+    echo '<div class="book-summary-row"><span>Date</span><strong id="summaryDateStep3">-</strong></div>';
+    echo '<div class="book-summary-row"><span>Time</span><strong id="summaryTimeStep3">-</strong></div>';
+    echo '<div class="book-summary-row"><span>Fee</span><strong class="book-fee" id="summaryFeeStep3">RM 0</strong></div>';
+    echo '</div></div></div>';
+    echo '<div class="book-nav"><button type="button" class="btn btn-outline js-back-step" data-back-step="2">&larr; Back</button><button type="button" class="btn btn-primary js-next-step" data-next-step="4">Next: Confirm &rarr;</button></div>';
+    echo '</section>';
+
+    echo '<section class="booking-panel" data-panel="4">';
+    echo '<div class="book-step4-grid">';
+    echo '<div class="book-summary-card"><h3>Appointment Summary</h3><div class="book-summary-list">';
+    echo '<div class="book-summary-row"><span>Service</span><strong id="summaryServiceStep4">-</strong></div>';
+    echo '<div class="book-summary-row"><span>Doctor</span><strong id="summaryDoctorStep4">-</strong></div>';
+    echo '<div class="book-summary-row"><span>Specialization</span><strong id="summarySpecialistStep4">-</strong></div>';
+    echo '<div class="book-summary-row"><span>Date</span><strong id="summaryDateStep4">-</strong></div>';
+    echo '<div class="book-summary-row"><span>Time</span><strong id="summaryTimeStep4">-</strong></div>';
+    echo '<div class="book-summary-row"><span>Estimated Fee</span><strong class="book-fee" id="summaryFeeStep4">RM 0</strong></div>';
+    echo '</div></div>';
+    echo '<div class="book-summary-card"><h3>Notes (Optional)</h3><div class="form-group"><label for="bookingNotesInput">Describe your symptoms or reason for visit</label><textarea id="bookingNotesInput" class="form-control booking-notes" name="notes" rows="7" placeholder="e.g. Fever for 3 days, headache..."></textarea></div></div>';
+    echo '</div>';
+    echo '<div class="book-nav"><button type="button" class="btn btn-outline js-back-step" data-back-step="3">&larr; Back</button><button type="submit" class="btn btn-primary">&#10004; Confirm Appointment</button></div>';
+    echo '</section>';
+
+    echo '</form>';
+
+    echo '<script>
+    (function () {
+        var wizard = document.getElementById("bookingWizardForm");
+        if (!wizard) return;
+
+        var steps = wizard.querySelectorAll(".booking-step");
+        var panels = wizard.querySelectorAll(".booking-panel");
+        var state = {
+            service: "",
+            servicePrice: "0",
+            doctor: "",
+            doctorSpecialist: "",
+            date: "",
+            time: ""
+        };
+
+        var serviceInput = document.getElementById("selectedServiceInput");
+        var doctorInput = document.getElementById("selectedDoctorInput");
+        var timeInput = document.getElementById("selectedTimeInput");
+        var dateInput = document.getElementById("bookingDateInput");
+
+        function formatDate(value) {
+            if (!value) return "-";
+            var date = new Date(value + "T00:00:00");
+            if (Number.isNaN(date.getTime())) return value;
+            return date.toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" });
+        }
+
+        function updateSummary() {
+            var feeText = "RM " + (state.servicePrice || "0");
+            var summaryMap = {
+                summaryServiceStep3: state.service || "-",
+                summaryDoctorStep3: state.doctor || "-",
+                summaryDateStep3: formatDate(state.date),
+                summaryTimeStep3: state.time || "-",
+                summaryFeeStep3: feeText,
+                summaryServiceStep4: state.service || "-",
+                summaryDoctorStep4: state.doctor || "-",
+                summarySpecialistStep4: state.doctorSpecialist || "-",
+                summaryDateStep4: formatDate(state.date),
+                summaryTimeStep4: state.time || "-",
+                summaryFeeStep4: feeText
+            };
+
+            Object.keys(summaryMap).forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) el.textContent = summaryMap[id];
+            });
+        }
+
+        function goToStep(stepNumber) {
+            steps.forEach(function (stepEl, idx) {
+                var current = idx + 1;
+                stepEl.classList.toggle("active", current === stepNumber);
+                stepEl.classList.toggle("done", current < stepNumber);
+            });
+
+            panels.forEach(function (panelEl) {
+                panelEl.classList.toggle("active", panelEl.getAttribute("data-panel") === String(stepNumber));
+            });
+
+            updateSummary();
+        }
+
+        function validateStep(stepNumber) {
+            if (stepNumber === 1 && !state.service) {
+                alert("Please select a service first.");
+                return false;
+            }
+            if (stepNumber === 2 && !state.doctor) {
+                alert("Please choose a doctor first.");
+                return false;
+            }
+            if (stepNumber === 3) {
+                if (!state.date) {
+                    alert("Please select a date first.");
+                    return false;
+                }
+                if (!state.time) {
+                    alert("Please select a time slot first.");
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        wizard.querySelectorAll(".js-select-service").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                wizard.querySelectorAll(".js-select-service").forEach(function (item) {
+                    item.classList.remove("selected");
+                });
+                btn.classList.add("selected");
+                state.service = btn.getAttribute("data-service-name") || "";
+                state.servicePrice = btn.getAttribute("data-service-price") || "0";
+                serviceInput.value = state.service;
+                updateSummary();
+            });
+        });
+
+        wizard.querySelectorAll(".js-select-doctor").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                wizard.querySelectorAll(".js-select-doctor").forEach(function (item) {
+                    item.classList.remove("selected");
+                });
+                btn.classList.add("selected");
+                state.doctor = btn.getAttribute("data-doctor-name") || "";
+                state.doctorSpecialist = btn.getAttribute("data-doctor-specialist") || "";
+                doctorInput.value = state.doctor;
+                updateSummary();
+            });
+        });
+
+        wizard.querySelectorAll(".js-time-slot").forEach(function (btn) {
+            if (btn.classList.contains("unavailable")) return;
+            btn.addEventListener("click", function () {
+                wizard.querySelectorAll(".js-time-slot").forEach(function (item) {
+                    item.classList.remove("selected");
+                });
+                btn.classList.add("selected");
+                state.time = btn.getAttribute("data-time") || "";
+                timeInput.value = state.time;
+                updateSummary();
+            });
+        });
+
+        if (dateInput) {
+            dateInput.addEventListener("change", function () {
+                state.date = dateInput.value || "";
+                updateSummary();
+            });
+        }
+
+        wizard.querySelectorAll(".js-next-step").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var currentStep = Number(btn.getAttribute("data-next-step")) - 1;
+                if (!validateStep(currentStep)) return;
+                goToStep(Number(btn.getAttribute("data-next-step")));
+            });
+        });
+
+        wizard.querySelectorAll(".js-back-step").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                goToStep(Number(btn.getAttribute("data-back-step")));
+            });
+        });
+
+        wizard.addEventListener("submit", function (event) {
+            if (!state.service || !state.doctor || !state.date || !state.time) {
+                event.preventDefault();
+                alert("Please complete all booking steps before confirming.");
+            }
+        });
+
+        goToStep(1);
+    })();
+    </script>';
 }
 
 function render_payment($role) {
