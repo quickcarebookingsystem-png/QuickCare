@@ -7,30 +7,6 @@ require_once __DIR__ . '/vendor/autoload.php';
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
-$SERVICES = [
-    ['icon' => '🩺', 'name' => 'General Check-up', 'price' => 'RM 50', 'desc' => 'Routine health screening and consultation'],
-    ['icon' => '🦷', 'name' => 'Dental Care', 'price' => 'RM 80', 'desc' => 'Dental examination, scaling and oral care'],
-    ['icon' => '👁', 'name' => 'Eye Examination', 'price' => 'RM 60', 'desc' => 'Vision testing and eye health check'],
-    ['icon' => '💉', 'name' => 'Vaccination', 'price' => 'RM 45', 'desc' => 'All approved vaccines available'],
-    ['icon' => '🧪', 'name' => 'Blood Test', 'price' => 'RM 50', 'desc' => 'Complete blood count and lab testing'],
-    ['icon' => '❤️', 'name' => 'Cardiology', 'price' => 'RM 120', 'desc' => 'Heart health consultation and screening'],
-];
-
-$DOCTORS = [
-    ['icon' => '👩‍⚕️', 'name' => 'Dr. Sarah Lim', 'spec' => 'General Practice', 'avail' => 'Mon-Fri'],
-    ['icon' => '👨‍⚕️', 'name' => 'Dr. Amir Hamzah', 'spec' => 'Dental Specialist', 'avail' => 'Tue-Sat'],
-    ['icon' => '👩‍⚕️', 'name' => 'Dr. Priya Menon', 'spec' => 'Eye Care', 'avail' => 'Mon-Thu'],
-    ['icon' => '👨‍⚕️', 'name' => 'Dr. Fauzi Rahman', 'spec' => 'Cardiology', 'avail' => 'Wed-Fri'],
-];
-
-$APPOINTMENTS = [
-    ['id' => 'APT-0145', 'user' => 'Ahmad Razif', 'doctor' => 'Dr. Sarah Lim', 'service' => 'General Check-up', 'date' => '05 May 2026', 'time' => '09:00', 'status' => 'approved', 'amount' => 'RM 52.00'],
-    ['id' => 'APT-0144', 'user' => 'Farah Nadia', 'doctor' => 'Dr. Amir Hamzah', 'service' => 'Dental Care', 'date' => '05 May 2026', 'time' => '09:30', 'status' => 'completed', 'amount' => 'RM 82.00'],
-    ['id' => 'APT-0143', 'user' => 'Raj Kumar', 'doctor' => 'Dr. Priya Menon', 'service' => 'Eye Examination', 'date' => '05 May 2026', 'time' => '10:00', 'status' => 'pending', 'amount' => 'RM 62.00'],
-    ['id' => 'APT-0142', 'user' => 'Lim Wei Xian', 'doctor' => 'Dr. Sarah Lim', 'service' => 'Blood Test', 'date' => '04 May 2026', 'time' => '14:00', 'status' => 'approved', 'amount' => 'RM 52.00'],
-    ['id' => 'APT-0141', 'user' => 'Nurul Syafiqah', 'doctor' => 'Dr. Fauzi Rahman', 'service' => 'Cardiology', 'date' => '03 May 2026', 'time' => '11:00', 'status' => 'rejected', 'amount' => 'RM 122.00'],
-];
-
 $PAGE_URLS = [
     'user' => [
         'dashboard' => 'user/user_dashboard.php', 'profile' => 'my_profile.php', 'services' => 'user/clinic_services.php',
@@ -288,6 +264,130 @@ function e($value) {
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
 
+function name_avatar($name) {
+    $name = trim((string) $name);
+    if ($name === '') {
+        return 'U';
+    }
+
+    $parts = preg_split('/\s+/', $name);
+    if (count($parts) === 1) {
+        return strtoupper(substr($parts[0], 0, 2));
+    }
+
+    return strtoupper(substr($parts[0], 0, 1) . substr($parts[1], 0, 1));
+}
+
+function format_phone_number($phone) {
+    $digits = preg_replace('/\D+/', '', (string) $phone);
+    if ($digits === '') {
+        return '';
+    }
+
+    if (str_starts_with($digits, '60')) {
+        $digits = substr($digits, 2);
+    }
+    if (str_starts_with($digits, '0')) {
+        $digits = substr($digits, 1);
+    }
+
+    if (strlen($digits) <= 2) {
+        return '+60 ' . $digits;
+    }
+
+    if (strlen($digits) <= 5) {
+        return '+60 ' . substr($digits, 0, 2) . '-' . substr($digits, 2);
+    }
+
+    return '+60 ' . substr($digits, 0, 2) . '-' . substr($digits, 2, 3) . ' ' . substr($digits, 5);
+}
+
+function fetch_all_assoc($conn, $sql, $types = '', $params = []) {
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return [];
+    }
+    if ($types !== '' && $params) {
+        $stmt->bind_param($types, ...$params);
+    }
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $rows = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+    $stmt->close();
+    return $rows;
+}
+
+function get_services($conn) {
+    return fetch_all_assoc(
+        $conn,
+        "SELECT service_id, service_icon, service_name, service_price, service_description
+         FROM services
+         ORDER BY service_id ASC"
+    );
+}
+
+function get_doctors($conn) {
+    return fetch_all_assoc(
+        $conn,
+        "SELECT d.doctor_id, d.doctor_icon, d.doctor_name, d.doctor_specialist,
+                GROUP_CONCAT(DISTINCT ds.available_day ORDER BY FIELD(ds.available_day, 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun') SEPARATOR ', ') AS available_days
+         FROM doctors d
+         LEFT JOIN doctor_schedule ds ON ds.doctor_id = d.doctor_id
+         GROUP BY d.doctor_id, d.doctor_icon, d.doctor_name, d.doctor_specialist
+         ORDER BY d.doctor_id ASC"
+    );
+}
+
+function get_appointments($conn, $role = null, $appointmentDate = null, $limit = null) {
+    $sql = "SELECT appointment_id, appointment_code, name, doctor_name, service_name,
+                   appointment_date, appointment_time, appointment_status, payment_status, amount
+            FROM appointments";
+    $types = '';
+    $params = [];
+    $where = [];
+
+    if ($role === 'user') {
+        $user = current_user($conn);
+        if ($user) {
+            $where[] = "name = ?";
+            $types .= 's';
+            $params[] = $user['name'];
+        }
+    }
+
+    if (!empty($appointmentDate)) {
+        $where[] = "appointment_date = ?";
+        $types .= 's';
+        $params[] = $appointmentDate;
+    }
+
+    if (!empty($where)) {
+        $sql .= " WHERE " . implode(" AND ", $where);
+    }
+
+    $sql .= " ORDER BY appointment_date DESC, appointment_time DESC, appointment_id DESC";
+    if ($limit !== null) {
+        $sql .= " LIMIT ?";
+        $types .= 'i';
+        $params[] = (int) $limit;
+    }
+    return fetch_all_assoc($conn, $sql, $types, $params);
+}
+
+function format_date_display($date) {
+    if (empty($date)) {
+        return '';
+    }
+    return date('d M Y', strtotime($date));
+}
+
+function format_time_display($time) {
+    if (empty($time)) {
+        return '';
+    }
+    return date('H:i', strtotime($time));
+}
+
 function app_header($title) {
     echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">';
     echo '<title>' . e($title) . '</title>';
@@ -309,8 +409,10 @@ function app_start($role, $page, $title = null) {
     echo '<div class="main-content"><div class="topbar"><span class="topbar-title">' . e($title) . '</span><div class="topbar-actions">';
     echo '<span class="text-muted text-sm">' . date('l, F j, Y') . '</span></div></div><div class="page-content">';
     if (!empty($_SESSION['QuickCare_message'])) {
-        echo '<div class="toast show success" style="position:static;margin-bottom:16px">' . e($_SESSION['QuickCare_message']) . '</div>';
+        $messageType = $_SESSION['QuickCare_message_type'] ?? 'success';
+        echo '<div class="toast show ' . e($messageType) . '" style="position:static;margin-bottom:16px">' . e($_SESSION['QuickCare_message']) . '</div>';
         unset($_SESSION['QuickCare_message']);
+        unset($_SESSION['QuickCare_message_type']);
     }
 }
 
@@ -334,16 +436,69 @@ function app_end() {
 }
 
 function render_dashboard($role) {
-    global $APPOINTMENTS;
+    global $conn;
+
+    $selectedDate = $_GET['view_date'] ?? null;
+    $calendarDate = $selectedDate ?: date('Y-m-d');
+    $viewMonth = isset($_GET['month']) ? (int)$_GET['month'] : (int)date('m', strtotime($calendarDate));
+    $viewYear = isset($_GET['year']) ? (int)$_GET['year'] : (int)date('Y', strtotime($calendarDate));
+
+    $appointments = get_appointments($conn, $role, $selectedDate, $selectedDate ? null : 10);
+
+    $firstDayOfMonth = strtotime("$viewYear-$viewMonth-01");
+    $daysInMonth = date('t', $firstDayOfMonth);
+    $startOfWeek = date('w', $firstDayOfMonth);
+    $monthName = date('F Y', $firstDayOfMonth);
+
+    $monthStart = date('Y-m-01', $firstDayOfMonth);
+    $monthEnd = date('Y-m-t', $firstDayOfMonth);
+
+    $stmt = $conn->prepare("SELECT DISTINCT appointment_date FROM appointments WHERE appointment_date BETWEEN ? AND ?");
+    $stmt->bind_param("ss", $monthStart, $monthEnd);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $bookedDates = [];
+    while ($row = $result->fetch_assoc()) { $bookedDates[] = $row['appointment_date']; }
+    $stmt->close();
+
     render_stats($role);
-    echo '<div class="dashboard-grid"><div><div class="card mb-20"><div class="card-header"><span class="card-title">Recent Appointments</span><a class="btn btn-sm btn-outline" href="' . e(page_url('appointments', $role)) . '">View All</a></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>User</th><th>Doctor</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>';
-    foreach (array_slice($APPOINTMENTS, 0, 5) as $a) {
-        echo '<tr><td>' . e($a['user']) . '</td><td>' . e($a['doctor']) . '</td><td>' . e($a['date']) . '</td><td>' . badge($a['status']) . '</td><td><a class="btn btn-sm btn-outline" href="' . e(action_url('view_appointment', ['id' => $a['id']])) . '">View</a></td></tr>';
+
+    $displayTitle = $selectedDate ? 'Appointments: ' . format_date_display($selectedDate) : 'Recent Appointments';
+    echo '<div class="dashboard-grid"><div><div class="card mb-20"><div class="card-header"><span class="card-title">' . e($displayTitle) . '</span><a class="btn btn-sm btn-outline" href="' . e(page_url('appointments', $role)) . '">View All</a></div><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Patient</th><th>Doctor</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>';
+    if (empty($appointments)) {
+        echo '<tr><td colspan="5" style="text-align:center">No appointments found.</td></tr>';
+    } else {
+        foreach ($appointments as $a) {
+            echo '<tr><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e(format_date_display($a['appointment_date'])) . '</td><td>' . badge($a['appointment_status']) . '</td><td><button type="button" class="btn btn-sm btn-outline dashboard-view-btn" onclick="showAppointmentDetails(this)" data-code="' . e($a['appointment_code']) . '" data-patient="' . e($a['name']) . '" data-doctor="' . e($a['doctor_name']) . '" data-service="' . e($a['service_name']) . '" data-date="' . e(format_date_display($a['appointment_date'])) . '" data-time="' . e(format_time_display($a['appointment_time'])) . '" data-status="' . e($a['appointment_status']) . '" data-payment="' . e($a['payment_status']) . '" data-amount="RM ' . e(number_format((float) $a['amount'], 2)) . '">View</button></td></tr>';
+        }
     }
-    echo '</tbody></table></div></div></div></div><div><div class="card mb-20"><div class="card-header"><span class="card-title">May 2026</span></div><div class="mini-calendar"><div class="cal-grid">';
+    echo '</tbody></table></div></div></div></div><div><div class="card mb-20">';
+
+    $prevMonth = $viewMonth - 1; $prevYear = $viewYear;
+    if ($prevMonth < 1) { $prevMonth = 12; $prevYear--; }
+    $nextMonth = $viewMonth + 1; $nextYear = $viewYear;
+    if ($nextMonth > 12) { $nextMonth = 1; $nextYear++; }
+
+    $baseUrl = page_url('dashboard', $role);
+    $sep = str_contains($baseUrl, '?') ? '&' : '?';
+
+    echo '<div class="card-header" style="padding-bottom:16px"><div class="cal-header" style="width:100%;margin-bottom:0">';
+    echo '<a class="cal-nav" href="' . e($baseUrl . $sep . 'month=' . $prevMonth . '&year=' . $prevYear) . '" style="text-decoration:none;color:inherit">◀</a>';
+    echo '<span class="card-title">' . e($monthName) . '</span>';
+    echo '<a class="cal-nav" href="' . e($baseUrl . $sep . 'month=' . $nextMonth . '&year=' . $nextYear) . '" style="text-decoration:none;color:inherit">▶</a>';
+    echo '</div></div>';
+
+    echo '<div class="mini-calendar"><div class="cal-grid">';
     foreach (['Su','Mo','Tu','We','Th','Fr','Sa'] as $d) echo '<div class="cal-day-label">' . $d . '</div>';
-    for ($i = 0; $i < 5; $i++) echo '<div class="cal-day other-month"></div>';
-    for ($d = 1; $d <= 31; $d++) echo '<div class="cal-day' . ($d === 5 ? ' today' : '') . (in_array($d, [12,14,19,26]) ? ' has-appt' : '') . '">' . $d . '</div>';
+    for ($i = 0; $i < $startOfWeek; $i++) echo '<div class="cal-day other-month"></div>';
+    for ($d = 1; $d <= $daysInMonth; $d++) {
+        $currDate = sprintf('%04d-%02d-%02d', $viewYear, $viewMonth, $d);
+        $classes = 'cal-day';
+        if ($selectedDate && $currDate === $selectedDate) $classes .= ' selected';
+        if ($currDate === date('Y-m-d')) $classes .= ' today';
+        if (in_array($currDate, $bookedDates)) $classes .= ' has-appt';
+        echo '<a href="' . e($baseUrl . $sep . 'view_date=' . $currDate . '&month=' . $viewMonth . '&year=' . $viewYear) . '" class="' . $classes . '" style="text-decoration:none">' . $d . '</a>';
+    }
     echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Quick Actions</span></div><div class="card-body"><div class="quick-actions">';
     $actions = [
         'user' => [['Book New Appointment','book'], ['View My Appointments','appointments'], ['Make Payment','payment']],
@@ -352,6 +507,30 @@ function render_dashboard($role) {
     ];
     foreach ($actions[$role] ?? [] as $a) echo '<a class="btn btn-outline w-full" href="' . e(page_url($a[1], $role)) . '">' . e($a[0]) . '</a>';
     echo '</div></div></div></div></div>';
+    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div></div></div><div class="modal-footer"><button type="button" class="btn btn-primary appointment-detail-close" onclick="closeModal(\'modal-appointment-details\')">Close</button></div></div></div>';
+    echo '<script>
+    function formatStatusLabel(status) {
+        const labels = { unpaid: "Unpaid", paid: "Paid" };
+        return labels[status] || (status ? status.charAt(0).toUpperCase() + status.slice(1) : "");
+    }
+    function setDetailBadge(id, status) {
+        const target = document.getElementById(id);
+        if (!target) return;
+        target.innerHTML = "<span class=\"badge badge-" + status + "\">" + formatStatusLabel(status) + "</span>";
+    }
+    function showAppointmentDetails(button) {
+        document.getElementById("detailAppointmentCode").textContent = button.dataset.code || "";
+        document.getElementById("detailPatient").textContent = button.dataset.patient || "";
+        document.getElementById("detailDoctor").textContent = button.dataset.doctor || "";
+        document.getElementById("detailService").textContent = button.dataset.service || "";
+        document.getElementById("detailDate").textContent = button.dataset.date || "";
+        document.getElementById("detailTime").textContent = button.dataset.time || "";
+        document.getElementById("detailAmount").textContent = button.dataset.amount || "";
+        setDetailBadge("detailStatus", button.dataset.status || "");
+        setDetailBadge("detailPayment", button.dataset.payment || "");
+        openModal("modal-appointment-details");
+    }
+    </script>';
 }
 
 function render_sidebar($conn, $role, $page) {
@@ -367,7 +546,7 @@ function render_sidebar($conn, $role, $page) {
         }
         echo '</div>';
     }
-    echo '</nav><div class="sidebar-footer"><div class="user-info"><div class="user-avatar">' . 'hh' . '</div><div>';
+    echo '</nav><div class="sidebar-footer"><div class="user-info"><div class="user-avatar">' . e(name_avatar($user['name'] ?? '')) . '</div><div>';
     echo '<div class="user-name">' . e($user['name']) . '</div><div class="user-email">' . e($user['email']) . '</div></div></div>';
     echo '<a class="btn-signout" href="' . e(action_url('logout')) . '" draggable = "false">🚪 Log Out</a></div></aside>';
 }
@@ -388,50 +567,75 @@ function render_stats($role) {
 }
 
 function badge($status) {
-    return '<span class="badge badge-' . e($status) . '">' . e(ucfirst($status)) . '</span>';
+    $labels = [
+        'unpaid' => 'Unpaid',
+        'paid' => 'Paid',
+    ];
+    $label = $labels[$status] ?? ucfirst($status);
+    return '<span class="badge badge-' . e($status) . '">' . e($label) . '</span>';
 }
 
 function render_profile($role) {
     global $conn;
     $u = current_user($conn);
-    echo '<div class="profile-header"><div class="profile-avatar-lg">👤</div><div><div class="profile-name">' . e($u['name']) . '</div><div class="profile-meta">' . e($u['role'] . ' · ID: ' . $u['user_id']) . '</div></div><button class="btn btn-outline" style="margin-left:auto" onclick="openModal(\'modal-edit-profile\')">✏️ Edit Profile</button></div>';
+    echo '<div class="profile-header"><div class="profile-avatar-lg">' . e(name_avatar($u['name'] ?? '')) . '</div><div><div class="profile-name">' . e($u['name']) . '</div><div class="profile-meta">' . e($u['role'] . ' · ID: ' . $u['user_id']) . '</div></div><button class="btn btn-outline" style="margin-left:auto" onclick="openModal(\'modal-edit-profile\')">✏️ Edit Profile</button></div>';
     echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Personal Information</span></div><div class="card-body"><div style="display:flex;flex-direction:column;gap:12px">';
-    foreach ([['Full Name',$u['name']], ['Email',$u['email']], ['Phone','+60 12-345 6789'], ['Gender','Male'], ['Blood Type','A+']] as $row) echo '<div class="flex-between"><span class="text-muted">' . e($row[0]) . '</span><span class="font-600">' . e($row[1]) . '</span></div><div class="divider"></div>';
-    echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Change Password</span></div><div class="card-body"><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="save_profile"><div class="form-group"><label>Current Password</label><input class="form-control" type="password"></div><div class="form-group"><label>New Password</label><input class="form-control" type="password"></div><div class="form-group"><label>Confirm Password</label><input class="form-control" type="password"></div><button class="btn btn-primary" style="width:auto">Update Password</button></form></div></div></div>';
+    foreach ([['Full Name',$u['name']], ['Email',$u['email']], ['Phone',format_phone_number($u['phone_number'])], ['Gender',$u['gender']], ['Date of Birth',$u['date_of_birth']], ['Blood Type',$u['blood_type']]] as $row) echo '<div class="flex-between"><span class="text-muted">' . e($row[0]) . '</span><span class="font-600">' . e($row[1]) . '</span></div><div class="divider"></div>';
+    echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Change Password</span></div><div class="card-body"><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="change_password"><div class="form-group"><label>Current Password</label><input class="form-control" type="password" name="current_password" required></div><div class="form-group"><label>New Password</label><input class="form-control" type="password" name="new_password" required></div><div class="form-group"><label>Confirm Password</label><input class="form-control" type="password" name="confirm_password" required></div><button class="btn btn-primary" style="width:auto">Update Password</button></form></div></div></div>';
 }
 
 function render_services($role) {
-    global $SERVICES;
-    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search services…"></div>';
-    if ($role === 'admin') echo '<button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-service\')">+ Add Service</button>';
+    global $conn;
+    $services = get_services($conn);
+    echo '<div class="toolbar">
+            <div class="search-input-wrap">
+                <span class="search-icon">🔍</span>
+                <input class="form-control" type="text" placeholder="Search services…">
+          </div>';
+    if ($role === 'admin') {
+        echo '<button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-service\')">
+                + Add Service
+              </button>';
+    }
     echo '</div><div class="services-grid">';
-    foreach ($SERVICES as $s) echo '<div class="service-card"><span class="service-icon">' . $s['icon'] . '</span><div class="service-name">' . e($s['name']) . '</div><div class="service-price">' . e($s['price']) . '</div><div class="service-desc">' . e($s['desc']) . '</div></div>';
+    foreach ($services as $s) {
+        echo '<div class="service-card">
+                <span class="service-icon">' . e($s['service_icon']) . '</span>
+                <div class="service-name">' . e($s['service_name']) . '</div>
+                <div class="service-price">RM ' . e(number_format((float) $s['service_price'], 2)) . '</div>
+                <div class="service-desc">' . e($s['service_description']) . '</div>
+              </div>';
+    }
     echo '</div>';
 }
 
 function render_doctors($role) {
-    global $DOCTORS;
+    global $conn;
+    $doctors = get_doctors($conn);
     echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search doctors…"></div>';
     if ($role === 'admin') echo '<button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-doctor\')">+ Add Doctor</button>';
     echo '</div><div class="doctor-grid">';
-    foreach ($DOCTORS as $d) {
-        echo '<div class="doctor-card"><div class="doctor-avatar">' . $d['icon'] . '</div><div class="doctor-name">' . e($d['name']) . '</div><div class="doctor-spec">' . e($d['spec']) . '</div><div class="doctor-avail">✅ Available ' . e($d['avail']) . '</div>';
-        if ($role === 'admin') echo '<div style="margin-top:12px;display:flex;gap:6px;justify-content:center"><button class="btn btn-sm btn-outline" onclick="openModal(\'modal-add-doctor\')">✏️</button><a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'doctor'])) . '">🗑</a></div>';
+    foreach ($doctors as $d) {
+        $available = $d['available_days'] ?: 'Not scheduled';
+        echo '<div class="doctor-card"><div class="doctor-avatar">' . e($d['doctor_icon']) . '</div><div class="doctor-name">' . e($d['doctor_name']) . '</div><div class="doctor-spec">' . e($d['doctor_specialist']) . '</div><div class="doctor-avail">✅ Available ' . e($available) . '</div>';
+        if ($role === 'admin') echo '<div style="margin-top:12px;display:flex;gap:6px;justify-content:center"><button class="btn btn-sm btn-outline" onclick="openModal(\'modal-add-doctor\')">✏️</button><a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'doctor', 'id' => $d['doctor_id']])) . '">🗑</a></div>';
         echo '</div>';
     }
     echo '</div>';
 }
 
 function appointment_actions($role, $a) {
+    $appointmentId = $a['appointment_code'] ?? $a['id'] ?? '';
+    $appointmentStatus = $a['appointment_status'] ?? '';
+    $paymentStatus = $a['payment_status'] ?? '';
     if ($role === 'user') {
-        if ($a['status'] === 'approved') return '<a class="btn btn-sm btn-danger" href="' . e(action_url('cancel_appointment', ['id' => $a['id']])) . '">Cancel</a>';
-        if ($a['status'] === 'completed') return '<a class="btn btn-sm btn-outline" href="' . e(page_url('payment', $role)) . '">Pay</a>';
-        return '<a class="btn btn-sm btn-outline" href="' . e(action_url('view_appointment', ['id' => $a['id']])) . '">View</a>';
+        if (in_array($appointmentStatus, ['approved', 'completed'], true) && in_array($paymentStatus, ['unpaid', 'rejected'], true)) return '<a class="btn btn-sm btn-outline" href="' . e(page_url('payment', $role)) . '">Pay</a>';
+        return '<a class="btn btn-sm btn-outline" href="' . e(action_url('view_appointment', ['id' => $appointmentId])) . '">View</a>';
     }
-    if ($role === 'admin' && $a['status'] === 'pending') {
-        return '<a class="btn btn-sm btn-success" href="' . e(action_url('approve', ['id' => $a['id']])) . '">✓ Approve</a> <a class="btn btn-sm btn-danger" href="' . e(action_url('reject', ['id' => $a['id']])) . '">✗ Reject</a>';
+    if ($role === 'admin' && $appointmentStatus === 'pending') {
+        return '<a class="btn btn-sm btn-success" href="' . e(action_url('approve', ['id' => $appointmentId])) . '">✓ Approve</a> <a class="btn btn-sm btn-danger" href="' . e(action_url('reject', ['id' => $appointmentId])) . '">✗ Reject</a>';
     }
-    return '<a class="btn btn-sm btn-teal" href="' . e(action_url('update_status', ['id' => $a['id']])) . '">Update</a>';
+    return '<a class="btn btn-sm btn-teal" href="' . e(action_url('update_status', ['id' => $appointmentId])) . '">Update</a>';
 }
 
 // ============================================
@@ -439,107 +643,69 @@ function appointment_actions($role, $a) {
 // ============================================
 
 function render_appointments($role) {
-    global $APPOINTMENTS;
-    echo '<div class="toolbar">
-            <div class="search-input-wrap">
-                <span class="search-icon">🔍</span>
-                <input class="form-control" type="text" placeholder="Search appointments..." id="searchAppointment">
-            </div>
-            <div class="filter-group">
-                <input class="form-control" type="date" id="filterDate" style="width:160px">
-                <select class="filter-select" id="filterStatus">
-                    <option value="">All Status</option>
-                    <option value="pending">Pending</option>
-                    <option value="approved">Approved</option>
-                    <option value="completed">Completed</option>
-                    <option value="rejected">Rejected</option>
-                </select>
-            </div>';
-    if ($role === 'admin') echo '<a class="btn btn-outline" href="' . e(action_url('export_report')) . '">⬇ Export</a>';
-    echo '</div>';
-    
-    echo '<div class="card"><div class="card-body" style="padding:0; overflow-x: auto;">
-            <table class="appointments-table" style="width:100%; border-collapse: collapse; min-width: 800px;">
-                <thead>
-                    <tr style="background: var(--surface2); border-bottom: 2px solid var(--border);">
-                        <th style="padding: 12px 8px; text-align: left;">ID</th>
-                        <th style="padding: 12px 8px; text-align: left;">User</th>
-                        <th style="padding: 12px 8px; text-align: left;">Doctor</th>
-                        <th style="padding: 12px 8px; text-align: left;">Service</th>
-                        <th style="padding: 12px 8px; text-align: left;">Date</th>
-                        <th style="padding: 12px 8px; text-align: left;">Time</th>
-                        <th style="padding: 12px 8px; text-align: left;">Status</th>
-                        <th style="padding: 12px 8px; text-align: left;">Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="appointmentsTableBody">';
-    
-    foreach ($APPOINTMENTS as $a) {
-        echo '<tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 12px 8px;">' . e($a['id']) . '</td>
-                <td style="padding: 12px 8px;">' . e($a['user']) . '</td>
-                <td style="padding: 12px 8px;">' . e($a['doctor']) . '</td>
-                <td style="padding: 12px 8px;">' . e($a['service']) . '</td>
-                <td style="padding: 12px 8px;">' . e($a['date']) . '</td>
-                <td style="padding: 12px 8px;">' . e($a['time']) . '</td>
-                <td style="padding: 12px 8px;">' . badge($a['status']) . '</td>
-                <td style="padding: 12px 8px;">' . appointment_actions($role, $a) . '</td>
-               </tr>';
+    global $conn;
+    $appointments = get_appointments($conn, $role);
+
+    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">Search</span><input class="form-control" type="text" placeholder="Search appointments..." id="searchAppointment"></div><div class="filter-group"><input class="form-control" type="date" id="filterDate" style="width:160px"><select class="filter-select" id="filterStatus"><option value="">All Status</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="completed">Completed</option><option value="unpaid">Unpaid</option><option value="paid">Paid</option><option value="rejected">Rejected</option></select></div>';
+    if ($role === 'admin') echo '<a class="btn btn-outline" href="' . e(action_url('export_report')) . '">Export</a>';
+    echo '</div><div class="card"><div class="card-body" style="padding:0; overflow-x:auto"><table class="appointments-table" style="width:100%; border-collapse:collapse; min-width:900px"><thead><tr><th>ID</th><th>User</th><th>Doctor</th><th>Service</th><th>Date</th><th>Time</th><th>Appointment</th><th>Payment</th><th>Actions</th></tr></thead><tbody id="appointmentsTableBody">';
+
+    if (empty($appointments)) {
+        echo '<tr><td colspan="9" style="text-align:center">No appointments found.</td></tr>';
     }
-    
-    echo '</tbody>
-            </table>
-          </div>
-        </div>';
-    
-    // Filter script
-    echo '
-    <script>
+
+    foreach ($appointments as $a) {
+        echo '<tr><td>' . e($a['appointment_code']) . '</td><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e($a['service_name']) . '</td><td data-date="' . e($a['appointment_date']) . '">' . e(format_date_display($a['appointment_date'])) . '</td><td>' . e(format_time_display($a['appointment_time'])) . '</td><td>' . badge($a['appointment_status']) . '</td><td>' . badge($a['payment_status']) . '</td><td class="flex gap-8">' . appointment_actions($role, $a) . '</td></tr>';
+    }
+
+    echo '</tbody></table></div></div>';
+    echo '<script>
     function filterAppointments() {
         const searchValue = document.getElementById("searchAppointment")?.value.toLowerCase() || "";
         const filterDate = document.getElementById("filterDate")?.value || "";
         const filterStatus = document.getElementById("filterStatus")?.value || "";
         const rows = document.querySelectorAll("#appointmentsTableBody tr");
-        
         rows.forEach(row => {
             const text = row.innerText.toLowerCase();
-            const dateCell = row.cells[4]?.innerText || "";
-            const statusCell = row.cells[6]?.innerText.toLowerCase() || "";
-            
+            const dateCell = row.cells[4]?.dataset.date || "";
+            const statusCell = ((row.cells[6]?.innerText || "") + " " + (row.cells[7]?.innerText || "")).toLowerCase();
             let show = true;
-            
             if (searchValue && !text.includes(searchValue)) show = false;
             if (filterDate && dateCell !== filterDate) show = false;
             if (filterStatus && !statusCell.includes(filterStatus)) show = false;
-            
             row.style.display = show ? "" : "none";
         });
     }
-    
-    const searchInput = document.getElementById("searchAppointment");
-    const dateFilter = document.getElementById("filterDate");
-    const statusFilter = document.getElementById("filterStatus");
-    
-    if (searchInput) searchInput.addEventListener("keyup", filterAppointments);
-    if (dateFilter) dateFilter.addEventListener("change", filterAppointments);
-    if (statusFilter) statusFilter.addEventListener("change", filterAppointments);
+    document.getElementById("searchAppointment")?.addEventListener("keyup", filterAppointments);
+    document.getElementById("filterDate")?.addEventListener("change", filterAppointments);
+    document.getElementById("filterStatus")?.addEventListener("change", filterAppointments);
     </script>';
 }
 
 function render_book() {
-    global $SERVICES, $DOCTORS;
+    global $conn;
+    $services = get_services($conn);
+    $doctors = get_doctors($conn);
     echo '<form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="book_appointment"><div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Choose Service</span></div><div class="card-body"><div class="services-grid">';
-    foreach ($SERVICES as $s) echo '<label class="service-card"><input type="radio" name="service" value="' . e($s['name']) . '" required> <span class="service-icon">' . $s['icon'] . '</span><div class="service-name">' . e($s['name']) . '</div><div class="service-price">' . e($s['price']) . '</div><div class="service-desc">' . e($s['desc']) . '</div></label>';
+    foreach ($services as $s) echo '<label class="service-card"><input type="checkbox" name="service" value="' . e($s['service_name']) . '" required> <span class="service-icon">' . e($s['service_icon']) . '</span><div class="service-name">' . e($s['service_name']) . '</div><div class="service-price">RM ' . e(number_format((float) $s['service_price'], 2)) . '</div><div class="service-desc">' . e($s['service_description']) . '</div></label>';
     echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Choose Doctor</span></div><div class="card-body"><div class="doctor-grid">';
-    foreach ($DOCTORS as $d) echo '<label class="doctor-card"><input type="radio" name="doctor" value="' . e($d['name']) . '" required><div class="doctor-avatar">' . $d['icon'] . '</div><div class="doctor-name">' . e($d['name']) . '</div><div class="doctor-spec">' . e($d['spec']) . '</div><div class="doctor-avail">Available ' . e($d['avail']) . '</div></label>';
+    foreach ($doctors as $d) echo '<label class="doctor-card"><input type="radio" name="doctor" value="' . e($d['doctor_name']) . '" required><div class="doctor-avatar">' . e($d['doctor_icon']) . '</div><div class="doctor-name">' . e($d['doctor_name']) . '</div><div class="doctor-spec">' . e($d['doctor_specialist']) . '</div><div class="doctor-avail">Available ' . e($d['available_days'] ?: 'Not scheduled') . '</div></label>';
     echo '</div></div></div></div><div class="card mt-20"><div class="card-header"><span class="card-title">Date, Time & Notes</span></div><div class="card-body"><div class="grid-2"><div class="form-group"><label>Date</label><input class="form-control" type="date" name="date" required></div><div class="form-group"><label>Time</label><select class="form-control" name="time" required><option>09:00</option><option>09:30</option><option>10:00</option><option>10:30</option><option>11:00</option><option>14:00</option></select></div></div><div class="form-group"><label>Symptoms / Notes</label><textarea class="form-control" rows="5" name="notes" placeholder="e.g. Fever for 3 days, headache…"></textarea></div><button class="btn btn-primary" style="width:auto">Confirm Appointment</button></div></div></form>';
 }
 
 function render_payment($role) {
-    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">' . ($role === 'user' ? 'Make Payment' : 'Manage Payments') . '</span></div><div class="card-body"><form method="post" action="action.php"><input type="hidden" name="action" value="process_payment"><div class="form-group"><label>Select Appointment</label><select class="form-control"><option>APT-0144 - Dental Care - RM 82.00</option><option>APT-0145 - General Check-up - RM 52.00</option></select></div><h3 class="mb-16">Payment Method</h3><div class="payment-methods"><label class="payment-method selected"><input type="radio" name="method" value="card" checked><span class="pm-icon">💳</span>Credit Card</label><label class="payment-method"><input type="radio" name="method" value="bank"><span class="pm-icon">🏦</span>Online Banking</label><label class="payment-method"><input type="radio" name="method" value="wallet"><span class="pm-icon">📱</span>e-Wallet</label></div><div class="form-group"><label>Card Number</label><input class="form-control" placeholder="1234 5678 9012 3456"></div><button class="btn btn-primary">Pay RM 52.00</button></form></div></div><div class="card"><div class="card-header"><span class="card-title">Payment History</span></div><div class="card-body" style="padding:0"><tr><thead><tr><th>Invoice</th><th>Date</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody><tr><td>INV-0042</td><td>28 Apr</td><td>RM 52.00</td><td>' . badge('approved') . '</td><td><a class="btn btn-sm btn-outline" href="' . e(action_url('receipt')) . '">Receipt</a></td></tr>
-    <tr><td>INV-0038</td><td>15 Apr</td><td>RM 35.00</td><td>' . badge('approved') . '</td><td><a class="btn btn-sm btn-outline" href="' . e(action_url('receipt')) . '">Receipt</a></td></tr>
-    <tr><td>INV-0031</td><td>2 Apr</td><td>RM 80.00</td><td>' . badge('pending') . '</td><td><a class="btn btn-sm btn-primary" href="' . e(action_url('process_payment')) . '">Pay Now</a></td></tr>
-    </tbody></table></div></div></div>';
+    global $conn;
+    $appointments = get_appointments($conn, $role);
+    $payAmount = $appointments[0]['amount'] ?? '0.00';
+    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">' . ($role === 'user' ? 'Make Payment' : 'Manage Payments') . '</span></div><div class="card-body"><form method="post" action="action.php"><input type="hidden" name="action" value="process_payment"><div class="form-group"><label>Select Appointment</label><select class="form-control" name="appointment">';
+    foreach ($appointments as $a) {
+        echo '<option value="' . e($a['appointment_code']) . '">' . e($a['appointment_code'] . ' - ' . $a['service_name'] . ' - RM ' . number_format((float) $a['amount'], 2)) . '</option>';
+    }
+    echo '</select></div><h3 class="mb-16">Payment Method</h3><div class="payment-methods"><label class="payment-method selected"><input type="radio" name="method" value="card" checked><span class="pm-icon">Card</span>Credit Card</label><label class="payment-method"><input type="radio" name="method" value="bank"><span class="pm-icon">Bank</span>Online Banking</label><label class="payment-method"><input type="radio" name="method" value="wallet"><span class="pm-icon">Wallet</span>e-Wallet</label></div><div class="form-group"><label>Card Number</label><input class="form-control" placeholder="1234 5678 9012 3456"></div><button class="btn btn-primary">Pay RM ' . e(number_format((float) $payAmount, 2)) . '</button></form></div></div><div class="card"><div class="card-header"><span class="card-title">Payment History</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>Appointment</th><th>Date</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>';
+    foreach ($appointments as $a) {
+        echo '<tr><td>' . e($a['appointment_code']) . '</td><td>' . e(format_date_display($a['appointment_date'])) . '</td><td>RM ' . e(number_format((float) $a['amount'], 2)) . '</td><td>' . badge($a['payment_status']) . '</td><td><a class="btn btn-sm btn-outline" href="' . e(action_url('receipt', ['id' => $a['appointment_code']])) . '">Receipt</a></td></tr>';
+    }
+    echo '</tbody></table></div></div></div>';
 }
 
 function render_reports() {
@@ -562,85 +728,43 @@ function render_staff() {
 // ============================================
 
 function render_schedule() {
-    echo '<div class="toolbar">
-            <input class="form-control" type="date" id="scheduleDate" style="width:200px" value="2026-05-20">
-            <select class="filter-select" id="scheduleDoctor">
-                <option value="">All Doctors</option>
-                <option>Dr. Sarah Lim</option>
-                <option>Dr. Amir Hamzah</option>
-                <option>Dr. Priya Menon</option>
-                <option>Dr. Fauzi Rahman</option>
-            </select>
-          </div>';
-    
-    echo '<div class="card">
-            <div class="card-header">
-                <span class="card-title">Daily Schedule</span>
-            </div>
-            <div class="card-body" style="padding:0; overflow-x: auto;">
-                <table class="data-table" style="width:100%; border-collapse: collapse; min-width: 700px;">
-                    <thead>
-                        <tr style="background: var(--surface2); border-bottom: 2px solid var(--border);">
-                            <th style="padding: 12px 8px; text-align: left;">Time</th>
-                            <th style="padding: 12px 8px; text-align: left;">User</th>
-                            <th style="padding: 12px 8px; text-align: left;">Doctor</th>
-                            <th style="padding: 12px 8px; text-align: left;">Service</th>
-                            <th style="padding: 12px 8px; text-align: left;">Status</th>
-                            <th style="padding: 12px 8px; text-align: left;">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>';
-    
-    $schedules = [
-        ['09:00', 'Ahmad Razif', 'Dr. Sarah Lim', 'General Check-up', 'approved'],
-        ['09:30', 'Farah Nadia', 'Dr. Amir Hamzah', 'Dental Care', 'completed'],
-        ['10:00', 'Raj Kumar', 'Dr. Priya Menon', 'Eye Examination', 'pending'],
-        ['10:30', 'Lim Wei Xian', 'Dr. Sarah Lim', 'General Check-up', 'approved'],
-        ['11:00', 'Nurul Syafiqah', 'Dr. Fauzi Rahman', 'Cardiology', 'approved'],
-        ['14:00', 'Ahmad Razif', 'Dr. Sarah Lim', 'Blood Test', 'approved'],
-    ];
-    
-    foreach ($schedules as $row) {
-        echo '<tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 12px 8px;">' . $row[0] . '</td>
-                <td style="padding: 12px 8px;">' . $row[1] . '</td>
-                <td style="padding: 12px 8px;">' . $row[2] . '</td>
-                <td style="padding: 12px 8px;">' . $row[3] . '</td>
-                <td style="padding: 12px 8px;">' . badge($row[4]) . '</td>
-                <td style="padding: 12px 8px;"><a class="btn btn-sm btn-teal" href="' . e(action_url('update_status')) . '">Update</a></td>
-               </tr>';
+    global $conn;
+    $today = date('Y-m-d');
+    $doctors = get_doctors($conn);
+    $appointments = fetch_all_assoc(
+        $conn,
+        "SELECT appointment_code, name, doctor_name, service_name, appointment_time, appointment_status
+         FROM appointments
+         WHERE appointment_date = ?
+         ORDER BY appointment_time ASC",
+        's',
+        [$today]
+    );
+
+    echo '<div class="toolbar"><input class="form-control" type="date" id="scheduleDate" style="width:200px" value="' . e($today) . '"><select class="filter-select" id="scheduleDoctor"><option value="">All Doctors</option>';
+    foreach ($doctors as $doctor) {
+        echo '<option>' . e($doctor['doctor_name']) . '</option>';
     }
-    
-    echo '</tbody>
-                </table>
-            </div>
-          </div>';
-    
-    // Add filter script
-    echo '
-    <script>
+    echo '</select></div><div class="card"><div class="card-header"><span class="card-title">Today Schedule - ' . e(format_date_display($today)) . '</span></div><div class="card-body" style="padding:0; overflow-x:auto"><table class="data-table" style="width:100%; border-collapse:collapse; min-width:700px"><thead><tr><th>Time</th><th>User</th><th>Doctor</th><th>Service</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+    if (empty($appointments)) {
+        echo '<tr><td colspan="6" style="text-align:center">No appointments found.</td></tr>';
+    }
+    foreach ($appointments as $row) {
+        echo '<tr><td>' . e(format_time_display($row['appointment_time'])) . '</td><td>' . e($row['name']) . '</td><td>' . e($row['doctor_name']) . '</td><td>' . e($row['service_name']) . '</td><td>' . badge($row['appointment_status']) . '</td><td><a class="btn btn-sm btn-teal" href="' . e(action_url('update_status', ['id' => $row['appointment_code']])) . '">Update</a></td></tr>';
+    }
+    echo '</tbody></table></div></div>';
+    echo '<script>
     function filterSchedule() {
         const doctor = document.getElementById("scheduleDoctor")?.value.toLowerCase() || "";
         const rows = document.querySelectorAll(".data-table tbody tr");
-        
         rows.forEach(row => {
             const doctorCell = row.cells[2]?.innerText.toLowerCase() || "";
-            let show = true;
-            
-            if (doctor && !doctorCell.includes(doctor)) show = false;
-            
-            row.style.display = show ? "" : "none";
+            row.style.display = doctor && !doctorCell.includes(doctor) ? "none" : "";
         });
     }
-    
-    const doctorFilter = document.getElementById("scheduleDoctor");
-    if (doctorFilter) doctorFilter.addEventListener("change", filterSchedule);
+    document.getElementById("scheduleDoctor")?.addEventListener("change", filterSchedule);
     </script>';
 }
-
-// ============================================
-// RENDER USERS - UPDATED VERSION (KEMAS & RESPONSIVE)
-// ============================================
 
 function render_users() {
     echo '<div class="toolbar">
@@ -729,12 +853,27 @@ function render_users() {
 }
 
 function render_modals() {
+    global $conn;
+    $user = current_user($conn) ?: [];
+    $gender = $user['gender'] ?? '';
+    $bloodType = $user['blood_type'] ?? '';
+
     echo <<<'HTML'
 <div class="modal-overlay" id="modal-add-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Add Staff Member</span><button class="modal-close" onclick="closeModal('modal-add-staff')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_staff"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" placeholder="e.g. Nurul Ain binti Razak"></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" placeholder="staff@QuickCare.my"></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone"></div><div class="form-group"><label>Role</label><select class="form-control" name="role"><option>Staff</option><option>Admin</option></select></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 <div class="modal-overlay" id="modal-add-doctor"><div class="modal"><div class="modal-header"><span class="modal-title">Add Doctor</span><button class="modal-close" onclick="closeModal('modal-add-doctor')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_doctor"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" placeholder="e.g. Dr. Ahmad Fauzi"></div><div class="form-group"><label>Specialization</label><input class="form-control" name="specialization"></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email"></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-doctor')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 <div class="modal-overlay" id="modal-add-service"><div class="modal"><div class="modal-header"><span class="modal-title">Add Service</span><button class="modal-close" onclick="closeModal('modal-add-service')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_service"><div class="modal-body"><div class="form-group"><label>Service Name</label><input class="form-control" name="name"></div><div class="form-group"><label>Fee (RM)</label><input class="form-control" type="number" name="fee"></div><div class="form-group"><label>Description</label><textarea class="form-control" name="description" rows="3"></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-service')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
-<div class="modal-overlay" id="modal-edit-profile"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Profile</span><button class="modal-close" onclick="closeModal('modal-edit-profile')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_profile"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" value="Ahmad Razif bin Hassan"></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" value="ahmad@email.com"></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone" value="+60 12-345 6789"></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-edit-profile')">Cancel</button><button class="btn btn-primary" style="width:auto">Save Changes</button></div></form></div></div>
 HTML;
+    echo '<div class="modal-overlay" id="modal-edit-profile" data-static-modal="true"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Profile</span><button class="modal-close" onclick="closeModal(\'modal-edit-profile\')">✕</button></div><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="save_profile"><div class="modal-body">';
+    echo '<div class="form-group"><label>Full Name</label><input class="form-control" name="name" value="' . e($user['name'] ?? '') . '" required></div>';
+    echo '<div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" value="' . e($user['email'] ?? '') . '" required></div>';
+    echo '<div class="form-group"><label>Phone</label><input class="form-control" type="tel" name="phone_number" data-phone-format pattern="^\+60\s[0-9]{2}-[0-9]{3}\s[0-9]{4,5}$" placeholder="+60 12-345 6789" value="' . e(format_phone_number($user['phone_number'] ?? '')) . '"></div>';
+    echo '<div class="form-group"><label>Gender</label><select class="form-control" name="gender"><option value="">Select gender</option><option value="Male"' . ($gender === 'Male' ? ' selected' : '') . '>Male</option><option value="Female"' . ($gender === 'Female' ? ' selected' : '') . '>Female</option></select></div>';
+    echo '<div class="form-group"><label>Date of Birth</label><input class="form-control" type="date" name="date_of_birth" value="' . e($user['date_of_birth'] ?? '') . '" max="' . date('Y-m-d') . '" min="' . date('Y-m-d', strtotime('-120 years')) . '"></div>';
+    echo '<div class="form-group"><label>Blood Type</label><select class="form-control" name="blood_type"><option value="">Select blood type</option>';
+    foreach (['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as $type) {
+        echo '<option value="' . e($type) . '"' . ($bloodType === $type ? ' selected' : '') . '>' . e($type) . '</option>';
+    }
+    echo '</select></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-edit-profile\')">Cancel</button><button class="btn btn-primary" style="width:auto">Save Changes</button></div></form></div></div>';
 }
 
 // ============================================
@@ -760,11 +899,12 @@ function get_user_pending_payments($user_id) {
               a.amount 
               FROM appointments a
               WHERE a.name = ? 
-              AND a.status IN ('approved', 'completed')
+              AND a.appointment_status IN ('approved', 'completed')
+              AND a.payment_status IN ('unpaid', 'rejected')
               AND NOT EXISTS (
                   SELECT 1 FROM payments p 
-                  WHERE p.appointment_id = a.appointment_code 
-                  AND p.status IN ('approved', 'pending')
+                  WHERE p.appointment_code = a.appointment_code 
+                  AND p.payment_status IN ('approved', 'pending')
               )";
     
     $stmt = $conn->prepare($query);
@@ -774,8 +914,6 @@ function get_user_pending_payments($user_id) {
     
     $payments = [];
     while ($row = $result->fetch_assoc()) {
-        // Use appointment_code as identifier
-        $row['appointment_id'] = $row['appointment_code'];
         $payments[] = $row;
     }
     $stmt->close();
@@ -796,13 +934,13 @@ function get_user_payment_history($user_id) {
     $user_name = $user['name'] ?? '';
     
     $query = "SELECT p.*, 
-              a.appointment_code as appointment_id, 
+              a.appointment_code, 
               a.appointment_date, 
               a.appointment_time,
               a.doctor_name, 
               a.service_name
               FROM payments p
-              LEFT JOIN appointments a ON p.appointment_id = a.appointment_code
+              LEFT JOIN appointments a ON p.appointment_code = a.appointment_code
               WHERE p.user_id = ?
               ORDER BY p.payment_date DESC";
     
@@ -826,13 +964,13 @@ function get_all_payments() {
     
     $query = "SELECT p.*, 
               u.name as patient_name, 
-              a.appointment_code as appointment_id, 
+              a.appointment_code, 
               a.appointment_date,
               a.doctor_name, 
               a.service_name
               FROM payments p
               LEFT JOIN users u ON p.user_id = u.id
-              LEFT JOIN appointments a ON p.appointment_id = a.appointment_code
+              LEFT JOIN appointments a ON p.appointment_code = a.appointment_code
               ORDER BY p.payment_date DESC";
     
     $result = $conn->query($query);
@@ -851,15 +989,15 @@ function get_pending_payments() {
     $query = "SELECT p.*, 
               u.name as patient_name, 
               u.email as patient_email,
-              a.appointment_code as appointment_id, 
+              a.appointment_code, 
               a.appointment_date, 
               a.appointment_time,
               a.doctor_name, 
               a.service_name
               FROM payments p
               LEFT JOIN users u ON p.user_id = u.id
-              LEFT JOIN appointments a ON p.appointment_id = a.appointment_code
-              WHERE p.status = 'pending'
+              LEFT JOIN appointments a ON p.appointment_code = a.appointment_code
+              WHERE p.payment_status = 'pending'
               ORDER BY p.payment_date ASC";
     
     $result = $conn->query($query);
@@ -882,7 +1020,7 @@ function generate_payment_id() {
 }
 
 // Submit payment (user upload receipt)
-function submit_payment($user_id, $appointment_id, $amount, $transaction_id, $remarks, $receipt_file) {
+function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $remarks, $receipt_file) {
     global $conn;
     
     // Get appointment details
@@ -891,7 +1029,7 @@ function submit_payment($user_id, $appointment_id, $amount, $transaction_id, $re
         FROM appointments a
         WHERE a.appointment_code = ?
     ");
-    $stmt->bind_param("s", $appointment_id);
+    $stmt->bind_param("s", $appointment_code);
     $stmt->execute();
     $appointment = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -908,11 +1046,11 @@ function submit_payment($user_id, $appointment_id, $amount, $transaction_id, $re
     $receipt_number = generate_receipt_number();
     
     $stmt = $conn->prepare("
-        INSERT INTO payments (payment_id, user_id, appointment_id, receipt_number, amount, 
-                              appointment_details, status, transaction_id, receipt_image, remarks, payment_date)
+        INSERT INTO payments (payment_id, user_id, appointment_code, receipt_number, amount, 
+                              appointment_details, payment_status, transaction_id, receipt_image, remarks, payment_date)
         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, NOW())
     ");
-    $stmt->bind_param("sisssdsss", $payment_id, $user_id, $appointment_id, $receipt_number, 
+    $stmt->bind_param("sisssdsss", $payment_id, $user_id, $appointment_code, $receipt_number, 
                       $amount, $appointment_details, $transaction_id, $receipt_file, $remarks);
     
     $success = $stmt->execute();
@@ -920,19 +1058,19 @@ function submit_payment($user_id, $appointment_id, $amount, $transaction_id, $re
     $stmt->close();
     
     if ($success) {
-        // Update appointment status to show payment initiated
-        $stmt = $conn->prepare("UPDATE appointments SET status = 'payment_pending' WHERE appointment_code = ?");
-        $stmt->bind_param("s", $appointment_id);
+        // Update appointment payment status to show payment verification is pending
+        $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'pending' WHERE appointment_code = ?");
+        $stmt->bind_param("s", $appointment_code);
         $stmt->execute();
         $stmt->close();
         
         // Log to payment history
         $stmt = $conn->prepare("
-            INSERT INTO payment_history (payment_id, user_id, appointment_id, receipt_number, 
-                                        amount, status, transaction_id, payment_date)
+            INSERT INTO payment_history (payment_id, user_id, appointment_code, receipt_number, 
+                                        amount, payment_status, transaction_id, payment_date)
             VALUES (?, ?, ?, ?, ?, 'pending', ?, NOW())
         ");
-        $stmt->bind_param("iissds", $payment_id_db, $user_id, $appointment_id, 
+        $stmt->bind_param("iissds", $payment_id_db, $user_id, $appointment_code, 
                           $receipt_number, $amount, $transaction_id);
         $stmt->execute();
         $stmt->close();
@@ -962,17 +1100,17 @@ function approve_payment($payment_id, $admin_id) {
         // Update payment status
         $stmt = $conn->prepare("
             UPDATE payments 
-            SET status = 'approved', approved_by = ?, approved_date = NOW()
+            SET payment_status = 'approved', approved_by = ?, approved_date = NOW()
             WHERE id = ?
         ");
         $stmt->bind_param("ii", $admin_id, $payment_id);
         $stmt->execute();
         $stmt->close();
         
-        // Update appointment status to paid
-        if ($payment['appointment_id']) {
-            $stmt = $conn->prepare("UPDATE appointments SET status = 'paid' WHERE appointment_code = ?");
-            $stmt->bind_param("s", $payment['appointment_id']);
+        // Update appointment payment status to paid
+        if ($payment['appointment_code']) {
+            $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'paid' WHERE appointment_code = ?");
+            $stmt->bind_param("s", $payment['appointment_code']);
             $stmt->execute();
             $stmt->close();
         }
@@ -980,7 +1118,7 @@ function approve_payment($payment_id, $admin_id) {
         // Update payment history
         $stmt = $conn->prepare("
             UPDATE payment_history 
-            SET status = 'approved', approved_by = ?, approved_date = NOW()
+            SET payment_status = 'approved', approved_by = ?, approved_date = NOW()
             WHERE payment_id = ?
         ");
         $stmt->bind_param("ii", $admin_id, $payment_id);
@@ -1016,7 +1154,7 @@ function reject_payment($payment_id, $admin_id, $reason) {
     
     $stmt = $conn->prepare("
         UPDATE payments 
-        SET status = 'rejected', approved_by = ?, approved_date = NOW(), remarks = CONCAT(remarks, '\nRejected: ', ?)
+        SET payment_status = 'rejected', approved_by = ?, approved_date = NOW(), remarks = CONCAT(remarks, '\nRejected: ', ?)
         WHERE id = ?
     ");
     $stmt->bind_param("isi", $admin_id, $reason, $payment_id);
@@ -1031,10 +1169,10 @@ function reject_payment($payment_id, $admin_id, $reason) {
         $payment = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         
-        // Update appointment status back to approved
-        if ($payment && $payment['appointment_id']) {
-            $stmt = $conn->prepare("UPDATE appointments SET status = 'approved' WHERE appointment_code = ?");
-            $stmt->bind_param("s", $payment['appointment_id']);
+        // Update appointment payment status so the patient can retry
+        if ($payment && $payment['appointment_code']) {
+            $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'rejected' WHERE appointment_code = ?");
+            $stmt->bind_param("s", $payment['appointment_code']);
             $stmt->execute();
             $stmt->close();
         }
@@ -1042,7 +1180,7 @@ function reject_payment($payment_id, $admin_id, $reason) {
         // Update payment history
         $stmt = $conn->prepare("
             UPDATE payment_history 
-            SET status = 'rejected', approved_by = ?, approved_date = NOW()
+            SET payment_status = 'rejected', approved_by = ?, approved_date = NOW()
             WHERE payment_id = ?
         ");
         $stmt->bind_param("ii", $admin_id, $payment_id);

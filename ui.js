@@ -15,6 +15,25 @@ function selectPM(el) {
 
 document.querySelectorAll('.modal-overlay').forEach(el => {
   el.addEventListener('click', e => {
+    if (el.dataset.staticModal === 'true') return;
     if (e.target === el) el.classList.remove('active');
+  });
+});
+
+function formatPhoneInput(value) {
+  let digits = value.replace(/\D/g, '');
+  if (digits.startsWith('60')) digits = digits.slice(2);
+  if (digits.startsWith('0')) digits = digits.slice(1);
+  digits = digits.slice(0, 11);
+  if (!digits) return '';
+  if (digits.length <= 2) return `+60 ${digits}`;
+  if (digits.length <= 5) return `+60 ${digits.slice(0, 2)}-${digits.slice(2)}`;
+  return `+60 ${digits.slice(0, 2)}-${digits.slice(2, 5)} ${digits.slice(5)}`;
+}
+
+document.querySelectorAll('[data-phone-format]').forEach(input => {
+  input.value = formatPhoneInput(input.value);
+  input.addEventListener('input', () => {
+    input.value = formatPhoneInput(input.value);
   });
 });

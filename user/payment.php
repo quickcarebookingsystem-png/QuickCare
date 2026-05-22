@@ -22,7 +22,7 @@ $pending_payments = get_user_pending_payments($user_id);
                 <?php if (empty($pending_payments)): ?>
                     <div class="alert-info">
                         <p>No pending payments. You don't have any approved appointments that need payment.</p>
-                        <a href="book_appointment.php" class="btn btn-primary" style="margin-top: 10px;">Book New Appointment</a>
+                        <a href="<?php echo e(page_url('book', 'user')); ?>" class="btn btn-primary" style="margin-top: 10px;">Book New Appointment</a>
                     </div>
                 <?php else: ?>
                     <select id="appointmentSelect" class="form-control" onchange="updateAmount()">
@@ -75,7 +75,7 @@ $pending_payments = get_user_pending_payments($user_id);
             <div class="step-content">
                 <h3>Upload Payment Receipt</h3>
                 <form id="paymentForm" enctype="multipart/form-data">
-                    <input type="hidden" id="appointmentId" name="appointment_id">
+                    <input type="hidden" id="appointmentCode" name="appointment_code">
                     <input type="hidden" id="amount" name="amount">
                     
                     <div class="form-group">
@@ -299,7 +299,7 @@ function updateAmount() {
     
     if (appointmentId) {
         document.getElementById('payAmount').innerHTML = 'RM ' + parseFloat(amount).toFixed(2);
-        document.getElementById('appointmentId').value = appointmentId;
+        document.getElementById('appointmentCode').value = appointmentId;
         document.getElementById('amount').value = amount;
         
         const qrData = `QUICKCARE-PAYMENT-${appointmentId}-RM${amount}`;
@@ -319,7 +319,7 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
     
     const formData = new FormData();
     formData.append('action', 'submit_payment');
-    formData.append('appointment_id', document.getElementById('appointmentId').value);
+    formData.append('appointment_code', document.getElementById('appointmentCode').value);
     formData.append('amount', document.getElementById('amount').value);
     formData.append('remarks', document.getElementById('remarks').value);
     formData.append('receipt', document.getElementById('receipt').files[0]);

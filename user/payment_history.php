@@ -29,8 +29,8 @@ $payments = get_user_payment_history($user_id);
                         <span class="payment-receipt">Receipt #: <?php echo htmlspecialchars($payment['receipt_number']); ?></span>
                         <span class="payment-date"><?php echo date('d M Y, h:i A', strtotime($payment['payment_date'])); ?></span>
                     </div>
-                    <span class="status-badge status-<?php echo $payment['status']; ?>">
-                        <?php echo ucfirst($payment['status']); ?>
+                    <span class="status-badge status-<?php echo $payment['payment_status']; ?>">
+                        <?php echo ucfirst($payment['payment_status']); ?>
                     </span>
                 </div>
                 <div class="payment-body">
@@ -51,13 +51,13 @@ $payments = get_user_payment_history($user_id);
                             <span class="detail-label">Transaction ID:</span>
                             <span class="detail-value"><?php echo htmlspecialchars($payment['transaction_id']); ?></span>
                         </div>
-                        <?php if ($payment['status'] == 'approved'): ?>
+                        <?php if ($payment['payment_status'] == 'approved'): ?>
                         <div class="detail-row">
                             <span class="detail-label">Approved By:</span>
                             <span class="detail-value">Admin on <?php echo date('d M Y', strtotime($payment['approved_date'])); ?></span>
                         </div>
                         <?php endif; ?>
-                        <?php if ($payment['status'] == 'rejected' && !empty($payment['remarks'])): ?>
+                        <?php if ($payment['payment_status'] == 'rejected' && !empty($payment['remarks'])): ?>
                         <div class="detail-row">
                             <span class="detail-label">Remarks:</span>
                             <span class="detail-value" style="color: var(--danger);"><?php echo nl2br(htmlspecialchars($payment['remarks'])); ?></span>
@@ -66,13 +66,13 @@ $payments = get_user_payment_history($user_id);
                     </div>
                 </div>
                 <div class="payment-footer">
-                    <?php if ($payment['status'] == 'approved'): ?>
+                    <?php if ($payment['payment_status'] == 'approved'): ?>
                     <button class="btn-print" onclick="printReceipt(<?php echo $payment['id']; ?>)">
                         Print Receipt
                     </button>
                     <?php endif; ?>
                     
-                    <?php if ($payment['status'] == 'rejected'): ?>
+                    <?php if ($payment['payment_status'] == 'rejected'): ?>
                     <a href="payment.php" class="btn-retry">
                         Retry Payment
                     </a>

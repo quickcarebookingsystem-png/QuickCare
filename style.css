@@ -470,6 +470,9 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .badge-approved { background: rgba(42,127,90,0.12); color: var(--success); }
 .badge-rejected { background: rgba(176,48,48,0.12); color: var(--danger); }
 .badge-completed { background: rgba(42,95,143,0.12); color: var(--info); }
+.badge-unpaid { background: rgba(107,114,128,0.12); color: var(--text-muted); }
+.badge-paid { background: rgba(42,127,90,0.12); color: var(--success); }
+.badge-cancelled { background: rgba(176,48,48,0.12); color: var(--danger); }
 .badge-active { background: rgba(42,127,90,0.12); color: var(--success); }
 
 /* ====== APPOINTMENT BOOKING ====== */
@@ -594,10 +597,13 @@ tbody td { padding: 12px 16px; color: var(--text); }
   font-size: 0.8rem;
   border-radius: 6px;
   cursor: pointer;
+  display: block;
   transition: all 0.15s;
+  color: inherit;
 }
 .cal-day:hover { background: var(--surface2); }
-.cal-day.today { background: var(--primary); color: white; font-weight: 600; }
+.cal-day.today { background: var(--border); }
+.cal-day.selected { background: var(--primary); color: white; font-weight: 600; }
 .cal-day.has-appt { position: relative; }
 .cal-day.has-appt::after {
   content: '';
@@ -701,6 +707,93 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .modal-close:hover { background: var(--border); }
 .modal-body { padding: 0 24px 24px; }
 .modal-footer { padding: 0 24px 24px; display: flex; gap: 12px; justify-content: flex-end; }
+
+.dashboard-view-btn {
+  min-width: 64px;
+}
+
+.appointment-details-modal {
+  width: min(560px, 94vw);
+  border-radius: 22px;
+}
+
+.appointment-details-modal .modal-header {
+  padding: 28px 30px 8px;
+}
+
+.appointment-details-modal .modal-title {
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.appointment-modal-close {
+  width: 48px;
+  height: 48px;
+  font-size: 0;
+}
+
+.appointment-modal-close::before {
+  content: "\00d7";
+  font-size: 24px;
+}
+
+.appointment-details-modal .modal-body {
+  padding: 0 30px 26px;
+}
+
+.appointment-detail-code {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: center;
+  padding: 18px 0 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.appointment-detail-code span,
+.appointment-detail-list span {
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+.appointment-detail-code strong {
+  color: var(--primary);
+  font-size: 1.3rem;
+}
+
+.appointment-detail-list {
+  display: grid;
+  gap: 18px;
+  padding-top: 28px;
+}
+
+.appointment-detail-list > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 2fr;
+  align-items: center;
+  gap: 24px;
+}
+
+.appointment-detail-list strong {
+  justify-self: end;
+  text-align: right;
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.appointment-detail-list .detail-amount {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.appointment-details-modal .modal-footer {
+  padding: 0 30px 30px;
+}
+
+.appointment-detail-close {
+  width: auto;
+  min-width: 104px;
+}
 
 /* ====== RECEIPT ====== */
 .receipt {

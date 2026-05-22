@@ -130,12 +130,12 @@ if ($action === 'submit_payment') {
     }
     
     $user_id = $_SESSION['id'];
-    $appointment_id = $_POST['appointment_id'] ?? '';
+    $appointment_code = $_POST['appointment_code'] ?? '';
     $amount = $_POST['amount'] ?? 0;
     $remarks = $_POST['remarks'] ?? '';
     
     // Validate input (transaction_id no longer required)
-    if (empty($appointment_id) || empty($amount)) {
+    if (empty($appointment_code) || empty($amount)) {
         echo json_encode(['success' => false, 'message' => 'Please fill in all required fields']);
         exit;
     }
@@ -176,7 +176,7 @@ if ($action === 'submit_payment') {
     // Generate random transaction ID for internal use
     $transaction_id = 'TXN' . time() . rand(1000, 9999);
     
-    $result = submit_payment($user_id, $appointment_id, $amount, $transaction_id, $remarks, $receipt_image);
+    $result = submit_payment($user_id, $appointment_code, $amount, $transaction_id, $remarks, $receipt_image);
     
     if ($result) {
         echo json_encode(['success' => true, 'message' => 'Payment submitted. Waiting for admin approval.']);
@@ -293,7 +293,7 @@ if ($action === 'get_receipt') {
 if ($action === 'get_pending_payments_count') {
     global $conn;
     
-    $result = $conn->query("SELECT COUNT(*) as count FROM payments WHERE status = 'pending'");
+    $result = $conn->query("SELECT COUNT(*) as count FROM payments WHERE payment_status = 'pending'");
     $row = $result->fetch_assoc();
     
     echo json_encode(['count' => $row['count']]);
@@ -301,6 +301,173 @@ if ($action === 'get_pending_payments_count') {
 }
 
 // ===========================================
+if ($action === 'change_password' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $user = current_user($conn);
+    $currentPassword = trim($_POST['current_password'] ?? '');
+    $newPassword = trim($_POST['new_password'] ?? '');
+    $confirmPassword = trim($_POST['confirm_password'] ?? '');
+    $back = $_SERVER['HTTP_REFERER'] ?? page_url('profile');
+
+    if (!$user) {
+        $_SESSION['QuickCare_message'] = "Please login again.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        redirect_to(app_url('login.php'));
+    }
+
+    if (!password_verify($currentPassword, $user['password'])) {
+        $_SESSION['QuickCare_message'] = "Current password is incorrect.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        redirect_to($back);
+    }
+
+    if ($currentPassword === $newPassword) {
+        $_SESSION['QuickCare_message'] = "New password cannot be the same as your current password.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        redirect_to($back);
+    }
+
+    if ($newPassword !== $confirmPassword) {
+        $_SESSION['QuickCare_message'] = "New password and confirm password do not match.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        redirect_to($back);
+    }
+
+    update_password($conn, $newPassword, $user['email']);
+    $_SESSION['QuickCare_message'] = "Password updated successfully.";
+    $_SESSION['QuickCare_message_type'] = "success";
+    redirect_to($back);
+}
+
+if ($action === 'save_profile' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SESSION['id'], $_POST['name'], $_POST['email'])) {
+    $id = (int) $_SESSION['id'];
+    $name = trim($_POST['name']);
+    $email = trim($_POST['email']);
+    $phoneNumber = format_phone_number($_POST['phone_number'] ?? '');
+    $gender = trim($_POST['gender'] ?? '');
+    $dateOfBirth = trim($_POST['date_of_birth'] ?? '');
+    $bloodType = trim($_POST['blood_type'] ?? '');
+
+    if ($dateOfBirth !== '') {
+        $dob = new DateTime($dateOfBirth);
+        $today = new DateTime('today');
+        $age = $today->diff($dob)->y;
+
+        if ($dob > $today || $age > 120) {
+            $_SESSION['QuickCare_message'] = "Date of birth must be between 0 and 120 years old.";
+            $_SESSION['QuickCare_message_type'] = "error";
+            redirect_to($_SERVER['HTTP_REFERER'] ?? page_url('profile'));
+        }
+    }
+
+    $gender = $gender === '' ? null : $gender;
+    $dateOfBirth = $dateOfBirth === '' ? null : $dateOfBirth;
+    $bloodType = $bloodType === '' ? null : $bloodType;
+
+    $stmt = $conn->prepare("
+        UPDATE users
+        SET name = ?, email = ?, phone_number = ?, gender = ?, date_of_birth = ?, blood_type = ?
+        WHERE id = ?
+    ");
+    $stmt->bind_param("ssssssi", $name, $email, $phoneNumber, $gender, $dateOfBirth, $bloodType, $id);
+    $stmt->execute();
+    $stmt->close();
+
+    $_SESSION['name'] = $name;
+}
+
+if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $user = current_user($conn);
+    $service = trim($_POST['service'] ?? '');
+    $doctor = trim($_POST['doctor'] ?? '');
+    $date = trim($_POST['date'] ?? '');
+    $time = trim($_POST['time'] ?? '');
+
+    $stmt = $conn->prepare("SELECT service_price FROM services WHERE service_name = ?");
+    $stmt->bind_param("s", $service);
+    $stmt->execute();
+    $serviceRow = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    $amount = (float) ($serviceRow['service_price'] ?? 0);
+
+    $result = $conn->query("
+        SELECT MAX(CAST(SUBSTRING(appointment_code, 5) AS UNSIGNED)) AS max_code
+        FROM appointments
+        WHERE appointment_code LIKE 'APT-%'
+    ");
+    $row = $result ? $result->fetch_assoc() : null;
+    $nextCode = ((int) ($row['max_code'] ?? 0)) + 1;
+    $appointmentCode = 'APT-' . str_pad($nextCode, 4, '0', STR_PAD_LEFT);
+    $name = $user['name'] ?? ($_SESSION['name'] ?? '');
+    $appointment_status = 'pending';
+    $payment_status = 'unpaid';
+
+    $stmt = $conn->prepare("
+        INSERT INTO appointments (appointment_code, name, doctor_name, service_name, appointment_date, appointment_time, appointment_status, payment_status, amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ");
+    $stmt->bind_param("ssssssssd", $appointmentCode, $name, $doctor, $service, $date, $time, $appointment_status, $payment_status, $amount);
+    $stmt->execute();
+    $stmt->close();
+
+    $_SESSION['QuickCare_message'] = "Appointment booked successfully.";
+    redirect_to(page_url('appointments', $_SESSION['QuickCare_role'] ?? 'user'));
+}
+
+if (in_array($action, ['cancel_appointment', 'approve', 'reject', 'update_status'], true)) {
+    $appointmentCode = $_GET['id'] ?? $_POST['id'] ?? '';
+    $appointment_status = match ($action) {
+        'cancel_appointment' => 'rejected',
+        'approve' => 'approved',
+        'reject' => 'rejected',
+        'update_status' => 'completed',
+    };
+
+    if ($appointmentCode !== '') {
+        $stmt = $conn->prepare("UPDATE appointments SET appointment_status = ? WHERE appointment_code = ?");
+        $stmt->bind_param("ss", $appointment_status, $appointmentCode);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
+if ($action === 'save_service' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $icon = trim($_POST['icon'] ?? '🏥');
+    $name = trim($_POST['name'] ?? '');
+    $fee = (float) ($_POST['fee'] ?? 0);
+    $description = trim($_POST['description'] ?? '');
+
+    if ($name !== '') {
+        $stmt = $conn->prepare("INSERT INTO services (service_icon, service_name, service_price, service_description) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("ssds", $icon, $name, $fee, $description);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
+if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $icon = trim($_POST['icon'] ?? '👨‍⚕️');
+    $name = trim($_POST['name'] ?? '');
+    $specialization = trim($_POST['specialization'] ?? '');
+
+    if ($name !== '') {
+        $stmt = $conn->prepare("INSERT INTO doctors (doctor_icon, doctor_name, doctor_specialist) VALUES (?, ?, ?)");
+        $stmt->bind_param("sss", $icon, $name, $specialization);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
+if ($action === 'delete') {
+    $type = $_GET['type'] ?? '';
+    $id = (int) ($_GET['id'] ?? 0);
+    if ($type === 'doctor' && $id > 0) {
+        $stmt = $conn->prepare("DELETE FROM doctors WHERE doctor_id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
 
 $message = match ($action) {
     'save_profile' => 'Profile updated successfully.',

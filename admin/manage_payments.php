@@ -21,14 +21,14 @@ $all_payments = get_all_payments();
         <div class="stat-box">
             <div class="stat-icon">✅</div>
             <div class="stat-info">
-                <span class="stat-value"><?php echo count(array_filter($all_payments, function($p) { return $p['status'] == 'approved'; })); ?></span>
+                <span class="stat-value"><?php echo count(array_filter($all_payments, function($p) { return $p['payment_status'] == 'approved'; })); ?></span>
                 <span class="stat-label">Approved</span>
             </div>
         </div>
         <div class="stat-box">
             <div class="stat-icon">❌</div>
             <div class="stat-info">
-                <span class="stat-value"><?php echo count(array_filter($all_payments, function($p) { return $p['status'] == 'rejected'; })); ?></span>
+                <span class="stat-value"><?php echo count(array_filter($all_payments, function($p) { return $p['payment_status'] == 'rejected'; })); ?></span>
                 <span class="stat-label">Rejected</span>
             </div>
         </div>
@@ -37,7 +37,7 @@ $all_payments = get_all_payments();
             <div class="stat-info">
                 <span class="stat-value">RM <?php 
                     $total = array_sum(array_column(array_filter($all_payments, function($p) { 
-                        return $p['status'] == 'approved'; 
+                        return $p['payment_status'] == 'approved'; 
                     }), 'amount'));
                     echo number_format($total, 2);
                 ?></span>
@@ -72,7 +72,7 @@ $all_payments = get_all_payments();
                 </thead>
                 <tbody id="paymentsTableBody">
                     <?php foreach ($all_payments as $payment): ?>
-                    <tr data-status="<?php echo $payment['status']; ?>" data-id="<?php echo $payment['id']; ?>">
+                    <tr data-status="<?php echo $payment['payment_status']; ?>" data-id="<?php echo $payment['id']; ?>">
                         <td><?php echo date('d M Y, h:i A', strtotime($payment['payment_date'])); ?></td>
                         <td><?php echo htmlspecialchars($payment['receipt_number']); ?></td>
                         <td><?php echo htmlspecialchars($payment['patient_name']); ?></td>
@@ -85,7 +85,7 @@ $all_payments = get_all_payments();
                             </button>
                         </td>
                         <td class="actions-cell">
-                            <?php if ($payment['status'] == 'pending'): ?>
+                            <?php if ($payment['payment_status'] == 'pending'): ?>
                                 <button class="btn-approve" onclick="approvePayment(<?php echo $payment['id']; ?>)">
                                     Approve
                                 </button>

@@ -38,15 +38,15 @@ $payments = get_all_payments();
                 </thead>
                 <tbody id="paymentsTableBody">
                     <?php foreach ($payments as $payment): ?>
-                    <tr data-status="<?php echo $payment['status']; ?>">
+                    <tr data-status="<?php echo $payment['payment_status']; ?>">
                         <td><?php echo date('d M Y', strtotime($payment['payment_date'])); ?></td>
                         <td><?php echo htmlspecialchars($payment['receipt_number']); ?></td>
                         <td><?php echo htmlspecialchars($payment['patient_name']); ?></td>
                         <td><?php echo htmlspecialchars($payment['appointment_details']); ?></td>
                         <td>RM <?php echo number_format($payment['amount'], 2); ?></td>
                         <td>
-                            <span class="status-badge status-<?php echo $payment['status']; ?>">
-                                <?php echo ucfirst($payment['status']); ?>
+                            <span class="status-badge status-<?php echo $payment['payment_status']; ?>">
+                                <?php echo ucfirst($payment['payment_status']); ?>
                             </span>
                         </td>
                         <td>
