@@ -78,7 +78,7 @@ function email_exist($conn, $email) {
 function create_user($conn, $name, $email, $password, $role) {
     $prefix = 'U';
     $stmt = $conn->prepare("
-        SELECT MAX(CAST(SUBSTRING(user_id, 2) AS UNSIGNED)) AS max_id
+        SELECT MAX(CAST(SUBSTRING(user_code, 2) AS UNSIGNED)) AS max_id
         FROM users
         WHERE role = 'user'
     ");
@@ -86,13 +86,13 @@ function create_user($conn, $name, $email, $password, $role) {
     $result = $stmt->get_result();
     $row = $result->fetch_assoc();
     $next_id = ((int)$row['max_id']) + 1;
-    $user_id = $prefix . str_pad($next_id, 3, '0', STR_PAD_LEFT);
+    $user_code = $prefix . str_pad($next_id, 3, '0', STR_PAD_LEFT);
     $stmt->close();
 
     $stmt = $conn->prepare(
-        "INSERT INTO users (user_id, name, email, password, role) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO users (user_code, name, email, password, role) VALUES (?, ?, ?, ?, ?)"
     );
-    $stmt->bind_param("sssss", $user_id, $name, $email, $password, $role);
+    $stmt->bind_param("sssss", $user_code, $name, $email, $password, $role);
     $success = $stmt->execute();
     $stmt->close();
     return $success;
@@ -187,7 +187,7 @@ function current_user($conn) {
     }
     $id = $_SESSION['id'];
     $stmt = $conn->prepare(
-        "SELECT * FROM users WHERE id = ?"
+        "SELECT * FROM users WHERE user_id = ?"
     );
     $stmt->bind_param("i", $id);
     $stmt->execute();
@@ -315,6 +315,50 @@ function fetch_all_assoc($conn, $sql, $types = '', $params = []) {
     $rows = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
     $stmt->close();
     return $rows;
+}
+
+function count_appointments($conn, $role = null, $conditions = [], $types = '', $params = []) {
+    $where = [];
+
+    if ($role === 'user') {
+        $user = current_user($conn);
+        if ($user) {
+            $where[] = "name = ?";
+            $types = 's' . $types;
+            array_unshift($params, $user['name']);
+        }
+    }
+
+    foreach ($conditions as $condition) {
+        $where[] = $condition;
+    }
+
+    $sql = "SELECT COUNT(*) AS total FROM appointments";
+    if (!empty($where)) {
+        $sql .= " WHERE " . implode(" AND ", $where);
+    }
+
+    $rows = fetch_all_assoc($conn, $sql, $types, $params);
+    return (int) ($rows[0]['total'] ?? 0);
+}
+
+function count_pending_payment_records($conn, $role = null) {
+    $sql = "SELECT COUNT(*) AS total FROM appointments WHERE payment_status = ?";
+    $types = 's';
+    $params = ['pending'];
+
+    if ($role === 'user') {
+        $user = current_user($conn);
+        if (!$user || !isset($user['user_id'])) {
+            return 0;
+        }
+        $sql .= " AND user_id = ?";
+        $types .= 'i';
+        $params[] = (int) $user['user_id'];
+    }
+
+    $rows = fetch_all_assoc($conn, $sql, $types, $params);
+    return (int) ($rows[0]['total'] ?? 0);
 }
 
 function get_services($conn) {
@@ -552,11 +596,21 @@ function render_sidebar($conn, $role, $page) {
 }
 
 function render_stats($role) {
+    global $conn;
+
+    $upcomingAppointments = count_appointments($conn, $role, ["appointment_date > CURDATE()"]);
+    $completedAppointments = count_appointments($conn, $role, ["appointment_status = ?"], 's', ['completed']);
+    $pendingPayments = count_pending_payment_records($conn, $role);
+
     $stats = [
         'user' => [['📅','primary','3','Upcoming Appts',''], ['✅','success','12','Completed','↑ 2 this month'], ['⏳','warning','1','Pending Payment','']],
         'staff' => [['📅','primary','24',"Today's Appointments",''], ['⏳','warning','8','Pending Review',''], ['✅','success','16','Confirmed','↑ 4 vs yesterday'], ['👥','teal','142','Total Users','']],
         'admin' => [['📅','primary','124','Total Appointments','↑ 12% this month'], ['💰','success','RM 6,240','Revenue','↑ 8% this month'], ['👥','teal','98','Active Users',''], ['⏳','warning','14','Pending Approvals','']],
     ];
+    $stats['user'][0][2] = $upcomingAppointments;
+    $stats['user'][1][2] = $completedAppointments;
+    $stats['user'][1][4] = '';
+    $stats['user'][2][2] = $pendingPayments;
     echo '<div class="stats-grid">';
     foreach ($stats[$role] ?? [] as $s) {
         echo '<div class="stat-card"><div class="stat-icon ' . e($s[1]) . '">' . $s[0] . '</div><div><div class="stat-value">' . e($s[2]) . '</div><div class="stat-label">' . e($s[3]) . '</div>';
@@ -578,7 +632,7 @@ function badge($status) {
 function render_profile($role) {
     global $conn;
     $u = current_user($conn);
-    echo '<div class="profile-header"><div class="profile-avatar-lg">' . e(name_avatar($u['name'] ?? '')) . '</div><div><div class="profile-name">' . e($u['name']) . '</div><div class="profile-meta">' . e($u['role'] . ' · ID: ' . $u['user_id']) . '</div></div><button class="btn btn-outline" style="margin-left:auto" onclick="openModal(\'modal-edit-profile\')">✏️ Edit Profile</button></div>';
+    echo '<div class="profile-header"><div class="profile-avatar-lg">' . e(name_avatar($u['name'] ?? '')) . '</div><div><div class="profile-name">' . e($u['name']) . '</div><div class="profile-meta">' . e($u['role'] . ' · ID: ' . $u['user_code']) . '</div></div><button class="btn btn-outline" style="margin-left:auto" onclick="openModal(\'modal-edit-profile\')">✏️ Edit Profile</button></div>';
     echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Personal Information</span></div><div class="card-body"><div style="display:flex;flex-direction:column;gap:12px">';
     foreach ([['Full Name',$u['name']], ['Email',$u['email']], ['Phone',format_phone_number($u['phone_number'])], ['Gender',$u['gender']], ['Date of Birth',$u['date_of_birth']], ['Blood Type',$u['blood_type']]] as $row) echo '<div class="flex-between"><span class="text-muted">' . e($row[0]) . '</span><span class="font-600">' . e($row[1]) . '</span></div><div class="divider"></div>';
     echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Change Password</span></div><div class="card-body"><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="change_password"><div class="form-group"><label>Current Password</label><input class="form-control" type="password" name="current_password" required></div><div class="form-group"><label>New Password</label><input class="form-control" type="password" name="new_password" required></div><div class="form-group"><label>Confirm Password</label><input class="form-control" type="password" name="confirm_password" required></div><button class="btn btn-primary" style="width:auto">Update Password</button></form></div></div></div>';
@@ -885,7 +939,7 @@ function get_user_pending_payments($user_id) {
     global $conn;
     
     // First get user name from users table
-    $stmt = $conn->prepare("SELECT name FROM users WHERE id = ?");
+    $stmt = $conn->prepare("SELECT name FROM users WHERE user_id = ?");
     $stmt->bind_param("i", $user_id);
     $stmt->execute();
     $user = $stmt->get_result()->fetch_assoc();
@@ -925,7 +979,7 @@ function get_user_pending_payments($user_id) {
 function get_user_payment_history($user_id) {
     global $conn;
     
-    $stmt = $conn->prepare("SELECT name FROM users WHERE id = ?");
+    $stmt = $conn->prepare("SELECT name FROM users WHERE user_id = ?");
     $stmt->bind_param("i", $user_id);
     $stmt->execute();
     $user = $stmt->get_result()->fetch_assoc();
@@ -969,7 +1023,7 @@ function get_all_payments() {
               a.doctor_name, 
               a.service_name
               FROM payments p
-              LEFT JOIN users u ON p.user_id = u.id
+              LEFT JOIN users u ON p.user_id = u.user_id
               LEFT JOIN appointments a ON p.appointment_code = a.appointment_code
               ORDER BY p.payment_date DESC";
     
@@ -995,7 +1049,7 @@ function get_pending_payments() {
               a.doctor_name, 
               a.service_name
               FROM payments p
-              LEFT JOIN users u ON p.user_id = u.id
+              LEFT JOIN users u ON p.user_id = u.user_id
               LEFT JOIN appointments a ON p.appointment_code = a.appointment_code
               WHERE p.payment_status = 'pending'
               ORDER BY p.payment_date ASC";
@@ -1014,8 +1068,8 @@ function generate_receipt_number() {
     return 'RCPT-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
 }
 
-// Generate payment ID
-function generate_payment_id() {
+// Generate payment code
+function generate_payment_code() {
     return 'PAY-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
 }
 
@@ -1042,36 +1096,24 @@ function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $
                           " on " . date('d M Y', strtotime($appointment['appointment_date'])) . 
                           " at " . $appointment['appointment_time'];
     
-    $payment_id = generate_payment_id();
+    $payment_code = generate_payment_code();
     $receipt_number = generate_receipt_number();
     
     $stmt = $conn->prepare("
-        INSERT INTO payments (payment_id, user_id, appointment_code, receipt_number, amount, 
+        INSERT INTO payments (payment_code, user_id, appointment_code, receipt_number, amount, 
                               appointment_details, payment_status, transaction_id, receipt_image, remarks, payment_date)
         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, NOW())
     ");
-    $stmt->bind_param("sisssdsss", $payment_id, $user_id, $appointment_code, $receipt_number, 
+    $stmt->bind_param("sisssdsss", $payment_code, $user_id, $appointment_code, $receipt_number, 
                       $amount, $appointment_details, $transaction_id, $receipt_file, $remarks);
     
     $success = $stmt->execute();
-    $payment_id_db = $stmt->insert_id;
     $stmt->close();
     
     if ($success) {
         // Update appointment payment status to show payment verification is pending
         $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'pending' WHERE appointment_code = ?");
         $stmt->bind_param("s", $appointment_code);
-        $stmt->execute();
-        $stmt->close();
-        
-        // Log to payment history
-        $stmt = $conn->prepare("
-            INSERT INTO payment_history (payment_id, user_id, appointment_code, receipt_number, 
-                                        amount, payment_status, transaction_id, payment_date)
-            VALUES (?, ?, ?, ?, ?, 'pending', ?, NOW())
-        ");
-        $stmt->bind_param("iissds", $payment_id_db, $user_id, $appointment_code, 
-                          $receipt_number, $amount, $transaction_id);
         $stmt->execute();
         $stmt->close();
     }
@@ -1087,7 +1129,7 @@ function approve_payment($payment_id, $admin_id) {
     
     try {
         // Get payment details
-        $stmt = $conn->prepare("SELECT * FROM payments WHERE id = ?");
+        $stmt = $conn->prepare("SELECT * FROM payments WHERE payment_id = ?");
         $stmt->bind_param("i", $payment_id);
         $stmt->execute();
         $payment = $stmt->get_result()->fetch_assoc();
@@ -1101,7 +1143,7 @@ function approve_payment($payment_id, $admin_id) {
         $stmt = $conn->prepare("
             UPDATE payments 
             SET payment_status = 'approved', approved_by = ?, approved_date = NOW()
-            WHERE id = ?
+            WHERE payment_id = ?
         ");
         $stmt->bind_param("ii", $admin_id, $payment_id);
         $stmt->execute();
@@ -1114,16 +1156,6 @@ function approve_payment($payment_id, $admin_id) {
             $stmt->execute();
             $stmt->close();
         }
-        
-        // Update payment history
-        $stmt = $conn->prepare("
-            UPDATE payment_history 
-            SET payment_status = 'approved', approved_by = ?, approved_date = NOW()
-            WHERE payment_id = ?
-        ");
-        $stmt->bind_param("ii", $admin_id, $payment_id);
-        $stmt->execute();
-        $stmt->close();
         
         // Insert into receipts table
         $stmt = $conn->prepare("
@@ -1155,7 +1187,7 @@ function reject_payment($payment_id, $admin_id, $reason) {
     $stmt = $conn->prepare("
         UPDATE payments 
         SET payment_status = 'rejected', approved_by = ?, approved_date = NOW(), remarks = CONCAT(remarks, '\nRejected: ', ?)
-        WHERE id = ?
+        WHERE payment_id = ?
     ");
     $stmt->bind_param("isi", $admin_id, $reason, $payment_id);
     $success = $stmt->execute();
@@ -1163,7 +1195,7 @@ function reject_payment($payment_id, $admin_id, $reason) {
     
     if ($success) {
         // Get payment details
-        $stmt = $conn->prepare("SELECT * FROM payments WHERE id = ?");
+        $stmt = $conn->prepare("SELECT * FROM payments WHERE payment_id = ?");
         $stmt->bind_param("i", $payment_id);
         $stmt->execute();
         $payment = $stmt->get_result()->fetch_assoc();
@@ -1177,16 +1209,6 @@ function reject_payment($payment_id, $admin_id, $reason) {
             $stmt->close();
         }
         
-        // Update payment history
-        $stmt = $conn->prepare("
-            UPDATE payment_history 
-            SET payment_status = 'rejected', approved_by = ?, approved_date = NOW()
-            WHERE payment_id = ?
-        ");
-        $stmt->bind_param("ii", $admin_id, $payment_id);
-        $stmt->execute();
-        $stmt->close();
-        
         // Send email notification
         send_payment_rejected_email($payment['user_id'], $payment, $reason);
     }
@@ -1198,7 +1220,7 @@ function reject_payment($payment_id, $admin_id, $reason) {
 function send_payment_approved_email($user_id, $payment) {
     global $conn;
     
-    $stmt = $conn->prepare("SELECT * FROM users WHERE id = ?");
+    $stmt = $conn->prepare("SELECT * FROM users WHERE user_id = ?");
     $stmt->bind_param("i", $user_id);
     $stmt->execute();
     $user = $stmt->get_result()->fetch_assoc();
@@ -1229,7 +1251,7 @@ function send_payment_approved_email($user_id, $payment) {
 function send_payment_rejected_email($user_id, $payment, $reason) {
     global $conn;
     
-    $stmt = $conn->prepare("SELECT * FROM users WHERE id = ?");
+    $stmt = $conn->prepare("SELECT * FROM users WHERE user_id = ?");
     $stmt->bind_param("i", $user_id);
     $stmt->execute();
     $user = $stmt->get_result()->fetch_assoc();
@@ -1263,8 +1285,8 @@ function get_receipt_html($payment_id) {
     $stmt = $conn->prepare("
         SELECT p.*, u.name as user_name, u.email as user_email
         FROM payments p
-        LEFT JOIN users u ON p.user_id = u.id
-        WHERE p.id = ?
+        LEFT JOIN users u ON p.user_id = u.user_id
+        WHERE p.payment_id = ?
     ");
     $stmt->bind_param("i", $payment_id);
     $stmt->execute();

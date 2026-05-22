@@ -55,7 +55,7 @@ $payments = get_all_payments();
                             </button>
                         </td>
                         <td>
-                            <button class="btn-view-details" onclick="viewDetails(<?php echo $payment['id']; ?>)">
+                            <button class="btn-view-details" onclick="viewDetails(<?php echo $payment['payment_id']; ?>)">
                                 👁️ View
                             </button>
                         </td>

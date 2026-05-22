@@ -37,7 +37,7 @@ if ($action === 'login') {
         $user = get_user_by_email($conn, $email);
         if ($user) {
             if (password_verify($password, $user['password'])) {
-                $_SESSION['id'] = $user['id'];
+                $_SESSION['id'] = $user['user_id'];
                 $_SESSION['name'] = $user['name'];
                 $_SESSION['QuickCare_role'] = $user['role'];
                 redirect_to(page_url('dashboard', $user['role']));
@@ -247,8 +247,8 @@ if ($action === 'get_payment_details') {
     $stmt = $conn->prepare("
         SELECT p.*, u.name as user_name, u.email as user_email
         FROM payments p
-        LEFT JOIN users u ON p.user_id = u.id
-        WHERE p.id = ?
+        LEFT JOIN users u ON p.user_id = u.user_id
+        WHERE p.payment_id = ?
     ");
     $stmt->bind_param("i", $payment_id);
     $stmt->execute();
@@ -366,7 +366,7 @@ if ($action === 'save_profile' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset
     $stmt = $conn->prepare("
         UPDATE users
         SET name = ?, email = ?, phone_number = ?, gender = ?, date_of_birth = ?, blood_type = ?
-        WHERE id = ?
+        WHERE user_id = ?
     ");
     $stmt->bind_param("ssssssi", $name, $email, $phoneNumber, $gender, $dateOfBirth, $bloodType, $id);
     $stmt->execute();

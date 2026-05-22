@@ -72,7 +72,7 @@ $all_payments = get_all_payments();
                 </thead>
                 <tbody id="paymentsTableBody">
                     <?php foreach ($all_payments as $payment): ?>
-                    <tr data-status="<?php echo $payment['payment_status']; ?>" data-id="<?php echo $payment['id']; ?>">
+                    <tr data-status="<?php echo $payment['payment_status']; ?>" data-id="<?php echo $payment['payment_id']; ?>">
                         <td><?php echo date('d M Y, h:i A', strtotime($payment['payment_date'])); ?></td>
                         <td><?php echo htmlspecialchars($payment['receipt_number']); ?></td>
                         <td><?php echo htmlspecialchars($payment['patient_name']); ?></td>
@@ -86,10 +86,10 @@ $all_payments = get_all_payments();
                         </td>
                         <td class="actions-cell">
                             <?php if ($payment['payment_status'] == 'pending'): ?>
-                                <button class="btn-approve" onclick="approvePayment(<?php echo $payment['id']; ?>)">
+                                <button class="btn-approve" onclick="approvePayment(<?php echo $payment['payment_id']; ?>)">
                                     Approve
                                 </button>
-                                <button class="btn-reject" onclick="showRejectModal(<?php echo $payment['id']; ?>)">
+                                <button class="btn-reject" onclick="showRejectModal(<?php echo $payment['payment_id']; ?>)">
                                     Reject
                                 </button>
                             <?php else: ?>
