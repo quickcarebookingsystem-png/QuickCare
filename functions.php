@@ -197,6 +197,22 @@ function current_user($conn) {
     return $user;
 }
 
+function update_user_status($conn, $userId, $status) {
+    if (!in_array($status, ['active', 'inactive'], true)) {
+        return false;
+    }
+
+    $stmt = $conn->prepare("UPDATE users SET user_status = ? WHERE user_id = ?");
+    if (!$stmt) {
+        return false;
+    }
+
+    $stmt->bind_param("si", $status, $userId);
+    $ok = $stmt->execute();
+    $stmt->close();
+    return $ok;
+}
+
 function reset_token($conn, $email){
     $token = bin2hex(random_bytes(32));
     $expiry = date("Y-m-d H:i:s", strtotime("+15 minutes"));
@@ -336,25 +352,6 @@ function count_appointments($conn, $role = null, $conditions = [], $types = '', 
     $sql = "SELECT COUNT(*) AS total FROM appointments";
     if (!empty($where)) {
         $sql .= " WHERE " . implode(" AND ", $where);
-    }
-
-    $rows = fetch_all_assoc($conn, $sql, $types, $params);
-    return (int) ($rows[0]['total'] ?? 0);
-}
-
-function count_pending_payment_records($conn, $role = null) {
-    $sql = "SELECT COUNT(*) AS total FROM appointments WHERE payment_status = ?";
-    $types = 's';
-    $params = ['pending'];
-
-    if ($role === 'user') {
-        $user = current_user($conn);
-        if (!$user || !isset($user['user_id'])) {
-            return 0;
-        }
-        $sql .= " AND user_id = ?";
-        $types .= 'i';
-        $params[] = (int) $user['user_id'];
     }
 
     $rows = fetch_all_assoc($conn, $sql, $types, $params);
@@ -598,19 +595,27 @@ function render_sidebar($conn, $role, $page) {
 function render_stats($role) {
     global $conn;
 
-    $upcomingAppointments = count_appointments($conn, $role, ["appointment_date > CURDATE()"]);
-    $completedAppointments = count_appointments($conn, $role, ["appointment_status = ?"], 's', ['completed']);
-    $pendingPayments = count_pending_payment_records($conn, $role);
+    $upcomingAppointments = count_appointments($conn, 'user', ["appointment_date > CURDATE()"]);
+    $completedAppointments = count_appointments($conn, 'user', ["appointment_status = ?"], 's', ['completed']);
+    $pendingPayments = count_appointments($conn, 'user', ["payment_status = ?"], 's', ['pending']);
+
+    $todayAppointments = count_appointments($conn, null, ["appointment_date = CURDATE()"]);
+    $pendingReview = count_appointments($conn, null, ["appointment_status = ?"], 's', ['pending']);
+    $confirmed = count_appointments($conn, null, ["appointment_status = ?"], 's', ['confirmed']);
+    $totalUsers = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ?", 's', ['user'])[0]['total'] ?? 0);
+
+    $totalAppointments = count_appointments($conn);
+    $pendingApprovalRows = fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM payments WHERE payment_status = ?", 's', ['pending']);
+    $pendingApprovals = (int) ($pendingApprovalRows[0]['total'] ?? 0);
+    $revenueRows = fetch_all_assoc($conn, "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_status = ?", 's', ['paid']);
+    $totalRevenue = (float) ($revenueRows[0]['total'] ?? 0);
+    $totalActiveUsers = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ? AND user_status = ?", 'ss', ['user', 'active'])[0]['total'] ?? 0);
 
     $stats = [
-        'user' => [['📅','primary','3','Upcoming Appts',''], ['✅','success','12','Completed','↑ 2 this month'], ['⏳','warning','1','Pending Payment','']],
-        'staff' => [['📅','primary','24',"Today's Appointments",''], ['⏳','warning','8','Pending Review',''], ['✅','success','16','Confirmed','↑ 4 vs yesterday'], ['👥','teal','142','Total Users','']],
-        'admin' => [['📅','primary','124','Total Appointments','↑ 12% this month'], ['💰','success','RM 6,240','Revenue','↑ 8% this month'], ['👥','teal','98','Active Users',''], ['⏳','warning','14','Pending Approvals','']],
+        'user' => [['📅','primary',$upcomingAppointments,'Upcoming Appointments',''], ['✅','success',$completedAppointments,'Completed',''], ['⏳','warning',$pendingPayments,'Pending Payment','']],
+        'staff' => [['📅','primary',$todayAppointments,"Today's Appointments",''], ['⏳','warning',$pendingReview,'Pending Review',''], ['✅','success',$confirmed,'Confirmed',''], ['👥','teal',$totalUsers,'Total Users','']],
+        'admin' => [['📅','primary',$totalAppointments,'Total Appointments',''], ['💰','success','RM ' . number_format($totalRevenue, 2),'Revenue',''], ['👥','teal',$totalActiveUsers,'Active Users',''], ['⏳','warning',$pendingApprovals,'Pending Approvals','']],
     ];
-    $stats['user'][0][2] = $upcomingAppointments;
-    $stats['user'][1][2] = $completedAppointments;
-    $stats['user'][1][4] = '';
-    $stats['user'][2][2] = $pendingPayments;
     echo '<div class="stats-grid">';
     foreach ($stats[$role] ?? [] as $s) {
         echo '<div class="stat-card"><div class="stat-icon ' . e($s[1]) . '">' . $s[0] . '</div><div><div class="stat-value">' . e($s[2]) . '</div><div class="stat-label">' . e($s[3]) . '</div>';
@@ -632,7 +637,8 @@ function badge($status) {
 function render_profile($role) {
     global $conn;
     $u = current_user($conn);
-    echo '<div class="profile-header"><div class="profile-avatar-lg">' . e(name_avatar($u['name'] ?? '')) . '</div><div><div class="profile-name">' . e($u['name']) . '</div><div class="profile-meta">' . e($u['role'] . ' · ID: ' . $u['user_code']) . '</div></div><button class="btn btn-outline" style="margin-left:auto" onclick="openModal(\'modal-edit-profile\')">✏️ Edit Profile</button></div>';
+    $accountStatus = strtolower((string)($u['user_status'] ?? 'inactive')) === 'active' ? 'active' : 'inactive';
+    echo '<div class="profile-header"><div class="profile-avatar-lg">' . e(name_avatar($u['name'] ?? '')) . '</div><div><div class="profile-name">' . e($u['name']) . '</div><div class="profile-meta">' . e($u['role'] . ' · ID: ' . $u['user_code']) . '</div><div style="margin-top:8px"><span class="badge badge-' . e($accountStatus) . '">• ' . e(ucfirst($accountStatus)) . '</span></div></div><button class="btn btn-outline" style="margin-left:auto" onclick="openModal(\'modal-edit-profile\')">✏️ Edit Profile</button></div>';
     echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Personal Information</span></div><div class="card-body"><div style="display:flex;flex-direction:column;gap:12px">';
     foreach ([['Full Name',$u['name']], ['Email',$u['email']], ['Phone',format_phone_number($u['phone_number'])], ['Gender',$u['gender']], ['Date of Birth',$u['date_of_birth']], ['Blood Type',$u['blood_type']]] as $row) echo '<div class="flex-between"><span class="text-muted">' . e($row[0]) . '</span><span class="font-600">' . e($row[1]) . '</span></div><div class="divider"></div>';
     echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Change Password</span></div><div class="card-body"><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="change_password"><div class="form-group"><label>Current Password</label><input class="form-control" type="password" name="current_password" required></div><div class="form-group"><label>New Password</label><input class="form-control" type="password" name="new_password" required></div><div class="form-group"><label>Confirm Password</label><input class="form-control" type="password" name="confirm_password" required></div><button class="btn btn-primary" style="width:auto">Update Password</button></form></div></div></div>';

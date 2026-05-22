@@ -37,6 +37,7 @@ if ($action === 'login') {
         $user = get_user_by_email($conn, $email);
         if ($user) {
             if (password_verify($password, $user['password'])) {
+                update_user_status($conn, (int)$user['user_id'], 'active');
                 $_SESSION['id'] = $user['user_id'];
                 $_SESSION['name'] = $user['name'];
                 $_SESSION['QuickCare_role'] = $user['role'];
@@ -111,6 +112,9 @@ if ($action === 'reset_password') {
 // ============================================
 
 if ($action === 'logout') {
+    if (isset($_SESSION['id'])) {
+        update_user_status($conn, (int)$_SESSION['id'], 'inactive');
+    }
     session_unset();
     session_destroy();
     redirect_to('login.php');
