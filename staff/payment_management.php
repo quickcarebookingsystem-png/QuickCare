@@ -15,7 +15,7 @@ $payments = get_all_payments();
     <!-- Filter Tabs -->
     <div class="filter-tabs">
         <button class="tab-btn active" data-filter="all">All</button>
-        <button class="tab-btn" data-filter="pending">Pending ⏳</button>
+        <button class="tab-btn" data-filter="verifying">Verifying ⏳</button>
         <button class="tab-btn" data-filter="approved">Approved ✅</button>
         <button class="tab-btn" data-filter="rejected">Rejected ❌</button>
     </div>
@@ -186,7 +186,8 @@ $payments = get_all_payments();
     display: inline-block;
 }
 
-.status-pending {
+.status-pending,
+.status-verifying {
     background: rgba(194,122,26,0.12);
     color: var(--warning);
 }

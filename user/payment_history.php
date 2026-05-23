@@ -29,9 +29,19 @@ $payments = get_user_payment_history($user_id);
                         <span class="payment-receipt">Receipt #: <?php echo htmlspecialchars($payment['receipt_number']); ?></span>
                         <span class="payment-date"><?php echo date('d M Y, h:i A', strtotime($payment['payment_date'])); ?></span>
                     </div>
-                    <?php $badgeStatus = ($payment['payment_status'] === 'approved') ? 'paid' : $payment['payment_status']; ?>
+                    <?php
+                    $badgeStatus = $payment['payment_status'];
+                    $badgeText = ucfirst($payment['payment_status']);
+                    if ($payment['payment_status'] === 'approved') {
+                        $badgeStatus = 'paid';
+                        $badgeText = 'Approved';
+                    } elseif (in_array($payment['payment_status'], ['pending', 'verifying'], true)) {
+                        $badgeStatus = 'verifying';
+                        $badgeText = 'Verifying';
+                    }
+                    ?>
                     <span class="badge badge-<?php echo htmlspecialchars($badgeStatus); ?>">
-                        <?php echo ucfirst($payment['payment_status']); ?>
+                        <?php echo $badgeText; ?>
                     </span>
                 </div>
                 <div class="payment-body">

@@ -49,7 +49,7 @@ $all_payments = get_all_payments();
     <!-- Filter Tabs -->
     <div class="filter-tabs">
         <button class="tab-btn active" data-filter="all">All</button>
-        <button class="tab-btn" data-filter="pending">Pending ⏳</button>
+        <button class="tab-btn" data-filter="verifying">Verifying ⏳</button>
         <button class="tab-btn" data-filter="approved">Approved ✅</button>
         <button class="tab-btn" data-filter="rejected">Rejected ❌</button>
     </div>
@@ -85,7 +85,7 @@ $all_payments = get_all_payments();
                             </button>
                         </td>
                         <td class="actions-cell">
-                            <?php if ($payment['payment_status'] == 'pending'): ?>
+                            <?php if (in_array($payment['payment_status'], ['verifying', 'pending'], true)): ?>
                                 <button class="btn-approve" onclick="approvePayment(<?php echo $payment['payment_id']; ?>)">
                                     Approve
                                 </button>

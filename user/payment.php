@@ -21,7 +21,7 @@ $pending_payments = get_user_pending_payments($user_id);
                 <h3>Select Appointment</h3>
                 <?php if (empty($pending_payments)): ?>
                     <div class="alert-info">
-                        <p>No pending payments. You don't have any approved appointments that need payment.</p>
+                        <p>No pending payments. You don't have any confirmed appointments that need payment.</p>
                         <a href="<?php echo e(page_url('book', 'user')); ?>" class="btn btn-primary" style="margin-top: 10px;">Book New Appointment</a>
                     </div>
                 <?php else: ?>

@@ -297,7 +297,7 @@ if ($action === 'get_receipt') {
 if ($action === 'get_pending_payments_count') {
     global $conn;
     
-    $result = $conn->query("SELECT COUNT(*) as count FROM payments WHERE payment_status = 'pending'");
+    $result = $conn->query("SELECT COUNT(*) as count FROM payments WHERE payment_status IN ('verifying', 'pending')");
     $row = $result->fetch_assoc();
     
     echo json_encode(['count' => $row['count']]);

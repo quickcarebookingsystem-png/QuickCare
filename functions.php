@@ -605,7 +605,7 @@ function render_stats($role) {
     $totalUsers = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ?", 's', ['user'])[0]['total'] ?? 0);
 
     $totalAppointments = count_appointments($conn);
-    $pendingApprovalRows = fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM payments WHERE payment_status = ?", 's', ['pending']);
+    $pendingApprovalRows = fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM payments WHERE payment_status IN ('verifying', 'pending')");
     $pendingApprovals = (int) ($pendingApprovalRows[0]['total'] ?? 0);
     $revenueRows = fetch_all_assoc($conn, "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_status = ?", 's', ['paid']);
     $totalRevenue = (float) ($revenueRows[0]['total'] ?? 0);
@@ -629,6 +629,7 @@ function badge($status) {
     $labels = [
         'unpaid' => 'Unpaid',
         'paid' => 'Paid',
+        'verifying' => 'Verifying',
     ];
     $label = $labels[$status] ?? ucfirst($status);
     return '<span class="badge badge-' . e($status) . '">' . e($label) . '</span>';
@@ -689,7 +690,7 @@ function appointment_actions($role, $a) {
     $appointmentStatus = $a['appointment_status'] ?? '';
     $paymentStatus = $a['payment_status'] ?? '';
     if ($role === 'user') {
-        if (in_array($appointmentStatus, ['approved', 'completed'], true) && in_array($paymentStatus, ['unpaid', 'rejected'], true)) return '<a class="btn btn-sm btn-outline" href="' . e(page_url('payment', $role)) . '">Pay</a>';
+        if (in_array($appointmentStatus, ['confirm', 'confirmed'], true) && in_array($paymentStatus, ['pending', 'rejected'], true)) return '<a class="btn btn-sm btn-outline" href="' . e(page_url('payment', $role)) . '">Pay</a>';
         return '<a class="btn btn-sm btn-outline" href="' . e(action_url('view_appointment', ['id' => $appointmentId])) . '">View</a>';
     }
     if ($role === 'admin' && $appointmentStatus === 'pending') {
@@ -1192,7 +1193,7 @@ HTML;
 // PAYMENT FUNCTIONS - Untuk QR Payment System
 // ============================================
 
-// Get user's pending payments (approved appointments that need payment)
+// Get user's pending payments (confirmed appointments with pending/rejected payment status)
 function get_user_pending_payments($user_id) {
     global $conn;
     
@@ -1210,13 +1211,13 @@ function get_user_pending_payments($user_id) {
               a.service_name, 
               a.amount 
               FROM appointments a
-              WHERE a.name = ? 
-              AND a.appointment_status IN ('approved', 'completed')
-              AND a.payment_status IN ('unpaid', 'rejected')
+              WHERE a.name = ?
+              AND a.appointment_status IN ('confirm', 'confirmed')
+              AND a.payment_status IN ('pending', 'rejected')
               AND NOT EXISTS (
                   SELECT 1 FROM payments p 
                   WHERE p.appointment_code = a.appointment_code 
-                  AND p.payment_status IN ('approved', 'pending')
+                  AND p.payment_status IN ('paid')
               )";
     
     $stmt = $conn->prepare($query);
@@ -1309,7 +1310,7 @@ function get_pending_payments() {
               FROM payments p
               LEFT JOIN users u ON p.user_id = u.user_id
               LEFT JOIN appointments a ON p.appointment_code = a.appointment_code
-              WHERE p.payment_status = 'pending'
+              WHERE p.payment_status IN ('verifying', 'pending')
               ORDER BY p.payment_date ASC";
     
     $result = $conn->query($query);
@@ -1360,7 +1361,7 @@ function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $
     $stmt = $conn->prepare("
         INSERT INTO payments (payment_code, user_id, appointment_code, receipt_number, amount, 
                               appointment_details, payment_status, transaction_id, receipt_image, remarks, payment_date)
-        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, NOW())
+        VALUES (?, ?, ?, ?, ?, ?, 'verifying', ?, ?, ?, NOW())
     ");
     $stmt->bind_param("sisssdsss", $payment_code, $user_id, $appointment_code, $receipt_number, 
                       $amount, $appointment_details, $transaction_id, $receipt_file, $remarks);
@@ -1369,8 +1370,8 @@ function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $
     $stmt->close();
     
     if ($success) {
-        // Update appointment payment status to show payment verification is pending
-        $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'pending' WHERE appointment_code = ?");
+        // Update appointment payment status to show payment verification is in progress
+        $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'verifying' WHERE appointment_code = ?");
         $stmt->bind_param("s", $appointment_code);
         $stmt->execute();
         $stmt->close();
