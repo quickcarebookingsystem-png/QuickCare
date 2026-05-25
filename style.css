@@ -16,7 +16,7 @@
   --warning: #C27A1A;
   --danger: #B03030;
   --info: #2A5F8F;
-  --radius: 12px;
+  --radius: 20px;
   --radius-sm: 8px;
   --shadow: 0 2px 16px rgba(124,51,73,0.08);
   --shadow-md: 0 4px 32px rgba(124,51,73,0.12);
@@ -456,6 +456,73 @@ tbody tr:last-child { border-bottom: none; }
 tbody tr:hover { background: var(--surface2); }
 tbody td { padding: 12px 16px; color: var(--text); }
 
+.appt-actions-cell {
+  text-align: center;
+}
+
+.appt-action-menu {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.appt-menu-trigger {
+  width: 36px;
+  height: 32px;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.appt-menu-trigger:hover {
+  background: var(--surface2);
+  color: var(--primary);
+}
+
+.appt-menu-list {
+  display: none;
+  position: fixed;
+  min-width: 148px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  z-index: 300;
+}
+
+.appt-action-menu.open .appt-menu-list {
+  display: grid;
+  gap: 2px;
+}
+
+.appt-menu-item {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.86rem;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.appt-menu-item:hover {
+  background: var(--surface2);
+}
+
+.appt-menu-item.danger {
+  color: var(--danger);
+}
+
 /* ====== BADGES ====== */
 .badge {
   display: inline-flex;
@@ -470,6 +537,7 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .badge-verifying { background: rgba(42,95,143,0.12); color: var(--info); }
 .badge-confirmed { background: rgba(42,127,90,0.12); color: var(--success); }
 .badge-rejected { background: rgba(176,48,48,0.12); color: var(--danger); }
+.badge-unpaid { background: rgba(176,48,48,0.12); color: var(--danger); }
 .badge-completed { background: rgba(42,95,143,0.12); color: var(--info); }
 .badge-paid { background: rgba(42,127,90,0.12); color: var(--success); }
 .badge-cancelled { background: rgba(176,48,48,0.12); color: var(--danger); }
@@ -567,7 +635,7 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .booking-wizard {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
 .booking-wizard .booking-steps {
@@ -575,8 +643,8 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 
 .booking-wizard .booking-step {
-  min-height: 94px;
-  padding: 14px 10px;
+  min-height: 82px;
+  padding: 12px 8px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -585,14 +653,14 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 
 .booking-wizard .step-num {
-  width: 40px;
-  height: 40px;
-  font-size: 1.15rem;
+  width: 32px;
+  height: 32px;
+  font-size: 0.9rem;
   line-height: 1;
 }
 
 .booking-wizard .step-label {
-  font-size: 0.92rem;
+  font-size: 0.82rem;
   font-weight: 600;
 }
 
@@ -603,23 +671,23 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 
 .booking-section-title {
-  font-size: 2rem;
-  margin-bottom: 12px;
+  font-size: 1.5rem;
+  margin-bottom: 10px;
 }
 
-.booking-subtitle { margin-top: 14px; }
+.booking-subtitle { margin-top: 12px; }
 
 .book-service-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(165px, 1fr));
+  grid-template-columns: repeat(5, minmax(180px, 1fr));
   gap: 14px;
 }
 
 .book-service-card {
   border: 1.5px solid var(--border);
   background: var(--surface);
-  border-radius: 14px;
-  padding: 20px 14px;
+  border-radius: var(--radius);
+  padding: 20px;
   text-align: center;
   cursor: pointer;
   transition: all 0.18s ease;
@@ -639,36 +707,36 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 
 .book-service-card .service-icon {
-  font-size: 28px;
-  margin-bottom: 8px;
+  font-size: 32px;
+  margin-bottom: 10px;
 }
 
 .book-service-card .service-name {
-  font-size: 1.05rem;
-  margin-bottom: 6px;
+  font-size: 0.9rem;
+  margin-bottom: 4px;
 }
 
 .book-service-card .service-price {
-  font-size: 1.1rem;
-  margin-bottom: 6px;
+  font-size: 0.85rem;
+  margin-bottom: 4px;
 }
 
 .book-service-card .service-desc {
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   line-height: 1.4;
 }
 
 .book-doctor-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(165px, 1fr));
+  grid-template-columns: repeat(4, minmax(200px, 1fr));
   gap: 14px;
 }
 
 .book-doctor-card {
   background: var(--surface);
-  border: 1.5px solid var(--border);
-  border-radius: 14px;
-  padding: 18px 14px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
   text-align: center;
   cursor: pointer;
   transition: all 0.2s;
@@ -687,57 +755,59 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 
 .book-doctor-card .doctor-avatar {
-  width: 62px;
-  height: 62px;
-  font-size: 26px;
+  width: 60px;
+  height: 60px;
+  font-size: 24px;
   margin-bottom: 10px;
 }
 
 .book-doctor-card .doctor-name {
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 0.9rem;
   margin-bottom: 4px;
 }
 
 .book-doctor-card .doctor-spec {
-  font-size: 0.9rem;
+  font-size: 0.78rem;
 }
 
 .book-doctor-card .doctor-avail {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   margin-top: 6px;
 }
 
 .book-step3-grid {
   display: grid;
-  grid-template-columns: 1.25fr 1fr;
-  gap: 14px;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
   align-items: start;
 }
 
 .booking-date-input {
-  font-size: 1rem;
-  padding: 12px 14px;
+  font-size: 0.95rem;
+  padding: 10px 12px;
 }
 
 .book-time-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(86px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .book-time-slot {
-  padding: 9px 6px;
+  min-height: 40px;
+  padding: 8px 5px;
   border: 1.5px solid var(--border);
   border-radius: 10px;
   text-align: center;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   cursor: pointer;
   transition: all 0.15s;
   background: var(--surface);
   color: inherit;
   font-family: inherit;
+  width: 100%;
 }
 
 .book-time-slot:hover { border-color: var(--primary); }
@@ -752,24 +822,35 @@ tbody td { padding: 12px 16px; color: var(--text); }
   background: var(--surface2);
 }
 
+.book-empty-slots {
+  grid-column: 1 / -1;
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
 .book-step4-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: 16px;
   align-items: start;
 }
 
 .book-summary-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px;
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.08);
 }
 
 .book-summary-card h3 {
   font-family: 'DM Sans', sans-serif;
-  font-size: 1.35rem;
-  margin-bottom: 10px;
+  font-size: 1.2rem;
+  margin-bottom: 8px;
 }
 
 .book-summary-list {
@@ -783,33 +864,67 @@ tbody td { padding: 12px 16px; color: var(--text); }
   justify-content: space-between;
   gap: 12px;
   padding: 10px 0;
-  border-bottom: 1px solid var(--border);
+  text-align: right;
 }
 
 .book-summary-row:last-child { border-bottom: none; }
 
 .book-summary-row span {
   color: var(--text-muted);
-  font-size: 0.95rem;
+  font-size: 0.92rem;
 }
 
 .book-summary-row strong {
-  font-size: 1.05rem;
+  font-size: 1.02rem;
   font-weight: 700;
   color: var(--text);
+}
+
+#summaryServiceStep3,
+#summaryDoctorStep3,
+#summaryDateStep3,
+#summaryTimeStep3,
+#summaryServiceStep4,
+#summaryDoctorStep4,
+#summarySpecialistStep4,
+#summaryDateStep4,
+#summaryTimeStep4 {
+  font-weight: 400;
 }
 
 .book-summary-row .book-fee {
   color: var(--primary);
 }
 
+.appointment-summary-list .appointment-summary-group {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 0 10px;
+  margin-bottom: 4px;
+}
+
+.appointment-summary-list .appointment-summary-group:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.appointment-summary-list .book-summary-row {
+  border-bottom: none;
+  padding: 8px 0;
+}
+
+.summary-multi-service {
+  white-space: pre-line;
+  text-align: right;
+}
+
 .booking-notes {
-  min-height: 170px;
-  font-size: 0.96rem;
+  min-height: 140px;
+  font-size: 0.9rem;
 }
 
 .book-nav {
-  margin-top: 16px;
+  margin-top: 12px;
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -820,26 +935,26 @@ tbody td { padding: 12px 16px; color: var(--text); }
 
 .book-nav .btn {
   width: auto;
-  min-width: 150px;
+  min-width: 130px;
   justify-content: center;
-  font-size: 0.92rem;
-  padding: 10px 16px;
+  font-size: 0.85rem;
+  padding: 9px 14px;
 }
 
 @media (max-width: 1520px) {
-  .booking-section-title { font-size: 1.75rem; }
+  .booking-section-title { font-size: 1.35rem; }
   .book-service-grid { grid-template-columns: repeat(4, minmax(160px, 1fr)); }
 }
 
 @media (max-width: 1280px) {
-  .booking-wizard .booking-step { min-height: 84px; }
+  .booking-wizard .booking-step { min-height: 74px; }
   .booking-wizard .step-num {
-    width: 36px;
-    height: 36px;
-    font-size: 1rem;
+    width: 30px;
+    height: 30px;
+    font-size: 0.86rem;
   }
-  .booking-wizard .step-label { font-size: 0.86rem; }
-  .booking-section-title { font-size: 1.55rem; }
+  .booking-wizard .step-label { font-size: 0.78rem; }
+  .booking-section-title { font-size: 1.25rem; }
   .book-service-grid { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
   .book-doctor-grid { grid-template-columns: repeat(2, minmax(190px, 1fr)); }
   .book-step3-grid,
@@ -860,10 +975,10 @@ tbody td { padding: 12px 16px; color: var(--text); }
   .booking-section-title { font-size: 1.3rem; }
   .book-service-grid,
   .book-doctor-grid { grid-template-columns: 1fr; }
-  .book-time-grid { grid-template-columns: repeat(3, minmax(80px, 1fr)); }
-  .book-summary-row span { font-size: 0.9rem; }
-  .book-summary-row strong { font-size: 1rem; }
-  .book-summary-card h3 { font-size: 1.2rem; }
+  .book-time-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .book-summary-row span { font-size: 0.95rem; }
+  .book-summary-row strong { font-size: 1.05rem; }
+  .book-summary-card h3 { font-size: 1.25rem; }
   .book-nav {
     flex-direction: column;
     align-items: stretch;
@@ -1024,6 +1139,8 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .appointment-details-modal {
   width: min(560px, 94vw);
   border-radius: 22px;
+  max-height: 90vh;
+  overflow-y: auto;
 }
 
 .appointment-details-modal .modal-header {
@@ -1087,7 +1204,18 @@ tbody td { padding: 12px 16px; color: var(--text); }
   justify-self: end;
   text-align: right;
   font-size: 1.15rem;
-  font-weight: 500;
+  font-weight: 400;
+}
+
+#detailNotes {
+  display: block;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.appointment-detail-list > .appointment-detail-notes {
+  align-items: start;
 }
 
 .appointment-detail-list .detail-amount {
@@ -1102,6 +1230,29 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .appointment-detail-close {
   width: auto;
   min-width: 104px;
+}
+
+.payment-proof-modal {
+  width: min(680px, 94vw);
+}
+
+.payment-proof-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+}
+
+.payment-proof-card img {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
 }
 
 /* ====== RECEIPT ====== */

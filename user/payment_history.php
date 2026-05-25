@@ -32,9 +32,9 @@ $payments = get_user_payment_history($user_id);
                     <?php
                     $badgeStatus = $payment['payment_status'];
                     $badgeText = ucfirst($payment['payment_status']);
-                    if ($payment['payment_status'] === 'approved') {
+                    if (in_array($payment['payment_status'], ['approved', 'paid'], true)) {
                         $badgeStatus = 'paid';
-                        $badgeText = 'Approved';
+                        $badgeText = 'Paid';
                     } elseif (in_array($payment['payment_status'], ['pending', 'verifying'], true)) {
                         $badgeStatus = 'verifying';
                         $badgeText = 'Verifying';
@@ -48,7 +48,7 @@ $payments = get_user_payment_history($user_id);
                     <div class="payment-details">
                         <div class="detail-row">
                             <span class="detail-label">Appointment:</span>
-                            <span class="detail-value"><?php echo htmlspecialchars($payment['appointment_details']); ?></span>
+                            <span class="detail-value"><?php echo htmlspecialchars(($payment['appointment_code'] ?? '')); ?></span>
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">Doctor:</span>
@@ -62,7 +62,7 @@ $payments = get_user_payment_history($user_id);
                             <span class="detail-label">Transaction ID:</span>
                             <span class="detail-value"><?php echo htmlspecialchars($payment['transaction_id']); ?></span>
                         </div>
-                        <?php if ($payment['payment_status'] == 'approved'): ?>
+                        <?php if (in_array($payment['payment_status'], ['approved', 'paid'], true)): ?>
                         <div class="detail-row">
                             <span class="detail-label">Approved By:</span>
                             <span class="detail-value">Admin on <?php echo date('d M Y', strtotime($payment['approved_date'])); ?></span>
@@ -77,14 +77,20 @@ $payments = get_user_payment_history($user_id);
                     </div>
                 </div>
                 <div class="payment-footer">
-                    <?php if ($payment['payment_status'] == 'approved'): ?>
+                    <?php if (in_array($payment['payment_status'], ['pending', 'verifying'], true)): ?>
+                    <button class="btn-print" onclick='viewPaymentProof(<?php echo json_encode($payment['receipt_image'] ?? ''); ?>)'>
+                        View Payment Proof
+                    </button>
+                    <?php endif; ?>
+
+                    <?php if (in_array($payment['payment_status'], ['approved', 'paid'], true)): ?>
                     <button class="btn-print" onclick="printReceipt(<?php echo $payment['payment_id']; ?>)">
-                        Print Receipt
+                        View Receipt
                     </button>
                     <?php endif; ?>
                     
                     <?php if ($payment['payment_status'] == 'rejected'): ?>
-                    <a href="payment.php" class="btn-retry">
+                    <a href="<?php echo e(page_url('payment', 'user') . '?appointment=' . urlencode($payment['appointment_code'] ?? '')); ?>" class="btn-print">
                         Retry Payment
                     </a>
                     <?php endif; ?>
@@ -93,6 +99,22 @@ $payments = get_user_payment_history($user_id);
             <?php endforeach; ?>
         </div>
     <?php endif; ?>
+</div>
+
+<!-- Payment Proof Modal -->
+<div id="proofModal" class="modal-overlay" style="display: none;">
+    <div class="modal proof-modal">
+        <div class="modal-header">
+            <span class="modal-title">Payment Proof</span>
+            <button class="modal-close" onclick="closeProofModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="proof-content" id="proofContent"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeProofModal()">Close</button>
+        </div>
+    </div>
 </div>
 
 <!-- Print Receipt Modal -->
@@ -255,7 +277,7 @@ $payments = get_user_payment_history($user_id);
     gap: 10px;
 }
 
-.btn-print, .btn-retry {
+.btn-print {
     padding: 8px 16px;
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -274,17 +296,30 @@ $payments = get_user_payment_history($user_id);
     background: var(--primary-dark);
 }
 
-.btn-retry {
-    background: var(--warning);
-    color: white;
-}
-
-.btn-retry:hover {
-    background: #b85c00;
-}
-
 .receipt-modal {
     max-width: 500px;
+}
+
+.proof-modal {
+    max-width: 680px;
+}
+
+.proof-content {
+    min-height: 280px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.proof-content img {
+    max-width: 100%;
+    max-height: 70vh;
+    border-radius: var(--radius-sm);
+    object-fit: contain;
 }
 
 .modal-footer {
@@ -335,6 +370,31 @@ async function printReceipt(paymentId) {
 
 function closeReceiptModal() {
     document.getElementById('receiptModal').style.display = 'none';
+}
+
+function viewPaymentProof(receiptImage) {
+    const modal = document.getElementById('proofModal');
+    const content = document.getElementById('proofContent');
+    if (!modal || !content) return;
+
+    if (!receiptImage) {
+        content.innerHTML = '<p class="text-muted">No payment proof uploaded.</p>';
+        modal.style.display = 'flex';
+        return;
+    }
+
+    const proofUrl = '../uploads/receipts/' + encodeURIComponent(receiptImage);
+    const extension = receiptImage.split('.').pop().toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) {
+        content.innerHTML = `<img src="${proofUrl}" alt="Payment proof">`;
+    } else {
+        content.innerHTML = `<a class="btn btn-outline" target="_blank" rel="noopener" href="${proofUrl}">Open Payment Proof</a>`;
+    }
+    modal.style.display = 'flex';
+}
+
+function closeProofModal() {
+    document.getElementById('proofModal').style.display = 'none';
 }
 </script>
 

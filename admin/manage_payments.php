@@ -21,7 +21,7 @@ $all_payments = get_all_payments();
         <div class="stat-box">
             <div class="stat-icon">✅</div>
             <div class="stat-info">
-                <span class="stat-value"><?php echo count(array_filter($all_payments, function($p) { return $p['payment_status'] == 'approved'; })); ?></span>
+                <span class="stat-value"><?php echo count(array_filter($all_payments, function($p) { return in_array($p['payment_status'], ['approved', 'paid'], true); })); ?></span>
                 <span class="stat-label">Approved</span>
             </div>
         </div>
@@ -37,7 +37,7 @@ $all_payments = get_all_payments();
             <div class="stat-info">
                 <span class="stat-value">RM <?php 
                     $total = array_sum(array_column(array_filter($all_payments, function($p) { 
-                        return $p['payment_status'] == 'approved'; 
+                        return in_array($p['payment_status'], ['approved', 'paid'], true);
                     }), 'amount'));
                     echo number_format($total, 2);
                 ?></span>
@@ -72,11 +72,20 @@ $all_payments = get_all_payments();
                 </thead>
                 <tbody id="paymentsTableBody">
                     <?php foreach ($all_payments as $payment): ?>
-                    <tr data-status="<?php echo $payment['payment_status']; ?>" data-id="<?php echo $payment['payment_id']; ?>">
+                    <?php
+                        $paymentStatus = strtolower((string) $payment['payment_status']);
+                        $paymentGroup = $paymentStatus;
+                        if (in_array($paymentStatus, ['pending', 'verifying'], true)) {
+                            $paymentGroup = 'verifying';
+                        } elseif (in_array($paymentStatus, ['paid', 'approved'], true)) {
+                            $paymentGroup = 'approved';
+                        }
+                    ?>
+                    <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>" data-id="<?php echo $payment['payment_id']; ?>">
                         <td><?php echo date('d M Y, h:i A', strtotime($payment['payment_date'])); ?></td>
                         <td><?php echo htmlspecialchars($payment['receipt_number']); ?></td>
                         <td><?php echo htmlspecialchars($payment['patient_name']); ?></td>
-                        <td><?php echo htmlspecialchars($payment['appointment_details']); ?></td>
+                        <td><?php echo htmlspecialchars($payment['appointment_code']); ?></td>
                         <td>RM <?php echo number_format($payment['amount'], 2); ?></td>
                         <td><?php echo htmlspecialchars($payment['transaction_id']); ?></td>
                         <td>

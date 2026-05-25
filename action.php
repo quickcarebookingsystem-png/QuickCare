@@ -179,8 +179,11 @@ if ($action === 'submit_payment') {
     
     // Generate random transaction ID for internal use
     $transaction_id = 'TXN' . time() . rand(1000, 9999);
-    
-    $result = submit_payment($user_id, $appointment_code, $amount, $transaction_id, $remarks, $receipt_image);
+
+    // Explicitly set uploaded payment status
+    $payment_status = 'verifying';
+
+    $result = submit_payment($user_id, $appointment_code, $amount, $transaction_id, $remarks, $receipt_image, $payment_status);
     
     if ($result) {
         echo json_encode(['success' => true, 'message' => 'Payment submitted. Waiting for admin approval.']);
@@ -267,7 +270,7 @@ if ($action === 'get_payment_details') {
             <div class="detail-row"><strong>Email:</strong> ' . htmlspecialchars($payment['user_email']) . '</div>
             <div class="detail-row"><strong>Amount:</strong> RM ' . number_format($payment['amount'], 2) . '</div>
             <div class="detail-row"><strong>Transaction ID:</strong> ' . htmlspecialchars($payment['transaction_id']) . '</div>
-            <div class="detail-row"><strong>Appointment:</strong> ' . htmlspecialchars($payment['appointment_details']) . '</div>
+            <div class="detail-row"><strong>Appointment Code:</strong> ' . htmlspecialchars($payment['appointment_code']) . '</div>
             <div class="detail-row"><strong>Remarks:</strong> ' . nl2br(htmlspecialchars($payment['remarks'])) . '</div>
             <div class="detail-row"><strong>Submitted:</strong> ' . date('d/m/Y h:i A', strtotime($payment['payment_date'])) . '</div>
         </div>';
@@ -381,18 +384,92 @@ if ($action === 'save_profile' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset
 
 if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $user = current_user($conn);
-    $service = trim($_POST['service'] ?? '');
+    $serviceInput = $_POST['service'] ?? '';
+    $selectedServices = [];
+    if (is_array($serviceInput)) {
+        foreach ($serviceInput as $serviceName) {
+            $serviceName = trim((string) $serviceName);
+            if ($serviceName !== '') {
+                $selectedServices[] = $serviceName;
+            }
+        }
+    } else {
+        $serviceParts = explode(',', (string) $serviceInput);
+        foreach ($serviceParts as $serviceName) {
+            $serviceName = trim($serviceName);
+            if ($serviceName !== '') {
+                $selectedServices[] = $serviceName;
+            }
+        }
+    }
+    $selectedServices = array_values(array_unique($selectedServices));
+
     $doctor = trim($_POST['doctor'] ?? '');
     $date = trim($_POST['date'] ?? '');
     $time = trim($_POST['time'] ?? '');
+    $notes = trim($_POST['notes'] ?? '');
 
-    $stmt = $conn->prepare("SELECT service_price FROM services WHERE service_name = ?");
-    $stmt->bind_param("s", $service);
+    if (empty($selectedServices)) {
+        $_SESSION['QuickCare_message'] = "Please select at least one service.";
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    }
+
+    $dateObj = DateTime::createFromFormat('Y-m-d', $date);
+    if ($doctor === '' || !$dateObj || $time === '') {
+        $_SESSION['QuickCare_message'] = "Please choose a doctor, date and time.";
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    }
+
+    $availableDay = $dateObj->format('D');
+    $appointmentTime = strlen($time) === 5 ? $time . ':00' : $time;
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) AS total
+        FROM doctor_schedule ds
+        INNER JOIN doctors d ON d.doctor_id = ds.doctor_id
+        WHERE d.doctor_name = ?
+          AND ds.available_day = ?
+          AND ds.start_time <= ?
+          AND ds.end_time > ?
+    ");
+    $stmt->bind_param("ssss", $doctor, $availableDay, $appointmentTime, $appointmentTime);
     $stmt->execute();
-    $serviceRow = $stmt->get_result()->fetch_assoc();
+    $scheduleRow = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
-    $amount = (float) ($serviceRow['service_price'] ?? 0);
+    if ((int)($scheduleRow['total'] ?? 0) === 0) {
+        $_SESSION['QuickCare_message'] = "Selected time is not available for this doctor.";
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    }
+
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) AS total
+        FROM appointments
+        WHERE doctor_name = ?
+          AND appointment_date = ?
+          AND appointment_time = ?
+          AND appointment_status NOT IN ('rejected', 'cancelled')
+    ");
+    $stmt->bind_param("sss", $doctor, $date, $appointmentTime);
+    $stmt->execute();
+    $bookingRow = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if ((int)($bookingRow['total'] ?? 0) > 0) {
+        $_SESSION['QuickCare_message'] = "Selected time slot is already booked.";
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    }
+
+    $amount = 0.0;
+    $stmt = $conn->prepare("SELECT service_price FROM services WHERE service_name = ?");
+    foreach ($selectedServices as $serviceName) {
+        $stmt->bind_param("s", $serviceName);
+        $stmt->execute();
+        $serviceRow = $stmt->get_result()->fetch_assoc();
+        $amount += (float) ($serviceRow['service_price'] ?? 0);
+    }
+    $stmt->close();
+
+    $service = implode(', ', $selectedServices);
 
     $result = $conn->query("
         SELECT MAX(CAST(SUBSTRING(appointment_code, 5) AS UNSIGNED)) AS max_code
@@ -403,14 +480,29 @@ if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $nextCode = ((int) ($row['max_code'] ?? 0)) + 1;
     $appointmentCode = 'APT-' . str_pad($nextCode, 4, '0', STR_PAD_LEFT);
     $name = $user['name'] ?? ($_SESSION['name'] ?? '');
-    $appointment_status = 'pending';
-    $payment_status = 'unpaid';
+    $userId = (int) ($user['user_id'] ?? ($_SESSION['id'] ?? 0));
+    $appointment_status = 'confirmed';
+    $payment_status = 'pending';
 
-    $stmt = $conn->prepare("
-        INSERT INTO appointments (appointment_code, name, doctor_name, service_name, appointment_date, appointment_time, appointment_status, payment_status, amount)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ");
-    $stmt->bind_param("ssssssssd", $appointmentCode, $name, $doctor, $service, $date, $time, $appointment_status, $payment_status, $amount);
+    $hasUserIdColumn = false;
+    $columnCheck = $conn->query("SHOW COLUMNS FROM appointments LIKE 'user_id'");
+    if ($columnCheck && $columnCheck->num_rows > 0) {
+        $hasUserIdColumn = true;
+    }
+
+    if ($hasUserIdColumn) {
+        $stmt = $conn->prepare("
+            INSERT INTO appointments (appointment_code, user_id, name, doctor_name, service_name, appointment_date, appointment_time, appointment_status, payment_status, amount, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->bind_param("sisssssssds", $appointmentCode, $userId, $name, $doctor, $service, $date, $time, $appointment_status, $payment_status, $amount, $notes);
+    } else {
+        $stmt = $conn->prepare("
+            INSERT INTO appointments (appointment_code, name, doctor_name, service_name, appointment_date, appointment_time, appointment_status, payment_status, amount, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->bind_param("ssssssssds", $appointmentCode, $name, $doctor, $service, $date, $time, $appointment_status, $payment_status, $amount, $notes);
+    }
     $stmt->execute();
     $stmt->close();
 
@@ -418,17 +510,36 @@ if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect_to(page_url('appointments', $_SESSION['QuickCare_role'] ?? 'user'));
 }
 
+if ($action === 'save_appointment_notes' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $user = current_user($conn);
+    $appointmentCode = trim($_POST['appointment_code'] ?? '');
+    $notes = trim($_POST['notes'] ?? '');
+
+    if ($user && $appointmentCode !== '') {
+        $stmt = $conn->prepare("UPDATE appointments SET notes = ? WHERE appointment_code = ? AND name = ?");
+        $stmt->bind_param("sss", $notes, $appointmentCode, $user['name']);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
 if (in_array($action, ['cancel_appointment', 'approve', 'reject', 'update_status'], true)) {
     $appointmentCode = $_GET['id'] ?? $_POST['id'] ?? '';
     $appointment_status = match ($action) {
-        'cancel_appointment' => 'rejected',
+        'cancel_appointment' => 'cancelled',
         'approve' => 'approved',
         'reject' => 'rejected',
         'update_status' => 'completed',
     };
 
     if ($appointmentCode !== '') {
-        $stmt = $conn->prepare("UPDATE appointments SET appointment_status = ? WHERE appointment_code = ?");
+        if ($appointment_status === 'completed') {
+            $stmt = $conn->prepare("UPDATE appointments SET appointment_status = ?, payment_status = 'paid' WHERE appointment_code = ?");
+        } elseif ($appointment_status === 'cancelled') {
+            $stmt = $conn->prepare("UPDATE appointments SET appointment_status = ?, payment_status = CASE WHEN payment_status = 'pending' THEN 'unpaid' ELSE payment_status END WHERE appointment_code = ?");
+        } else {
+            $stmt = $conn->prepare("UPDATE appointments SET appointment_status = ? WHERE appointment_code = ?");
+        }
         $stmt->bind_param("ss", $appointment_status, $appointmentCode);
         $stmt->execute();
         $stmt->close();
@@ -478,6 +589,7 @@ $message = match ($action) {
     'save_staff' => 'Staff member saved successfully.',
     'save_doctor' => 'Doctor saved successfully.',
     'save_service' => 'Service saved successfully.',
+    'save_appointment_notes' => 'Appointment notes updated.',
     'cancel_appointment' => 'Appointment cancelled.',
     'approve' => 'Appointment approved.',
     'reject' => 'Appointment rejected.',

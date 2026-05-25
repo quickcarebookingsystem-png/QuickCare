@@ -6,6 +6,7 @@ app_start('user', 'payment');
 
 $user_id = $_SESSION['id'];
 $pending_payments = get_user_pending_payments($user_id);
+$selected_appointment = $_GET['appointment'] ?? '';
 ?>
 
 <div class="checkout-container">
@@ -30,9 +31,10 @@ $pending_payments = get_user_pending_payments($user_id);
                         <?php foreach ($pending_payments as $payment): ?>
                         <option value="<?php echo htmlspecialchars($payment['appointment_code']); ?>" 
                                 data-amount="<?php echo $payment['amount']; ?>"
-                                data-name="<?php echo htmlspecialchars($payment['service_name']); ?>">
-                            <?php echo htmlspecialchars($payment['service_name']); ?> - 
-                            with Dr. <?php echo htmlspecialchars($payment['doctor_name']); ?> -
+                                data-name="<?php echo htmlspecialchars($payment['service_name']); ?>"
+                                <?php echo $payment['appointment_code'] === $selected_appointment ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($payment['appointment_code']); ?> -
+                            <?php echo htmlspecialchars($payment['service_name']); ?> -
                             RM <?php echo number_format($payment['amount'], 2); ?>
                         </option>
                         <?php endforeach; ?>
@@ -333,9 +335,16 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
     
     if (result.success) {
         alert('Payment submitted! Waiting for admin approval.');
-        window.location.reload();
+        window.location.href = '<?php echo e(page_url('payment_history', 'user')); ?>';
     } else {
         alert('Error: ' + result.message);
+    }
+});
+
+document.addEventListener('DOMContentLoaded', function () {
+    const select = document.getElementById('appointmentSelect');
+    if (select && select.value) {
+        updateAmount();
     }
 });
 </script>

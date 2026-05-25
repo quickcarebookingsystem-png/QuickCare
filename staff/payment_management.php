@@ -2,7 +2,7 @@
 require_once dirname(__DIR__) . '/functions.php';
 protect_page();
 app_header('QuickCare');
-app_start('staff', 'payment_management');
+app_start('staff', 'payment');
 
 $payments = get_all_payments();
 ?>
@@ -38,16 +38,24 @@ $payments = get_all_payments();
                 </thead>
                 <tbody id="paymentsTableBody">
                     <?php foreach ($payments as $payment): ?>
-                    <tr data-status="<?php echo $payment['payment_status']; ?>">
+                    <?php
+                        $paymentStatus = strtolower((string) $payment['payment_status']);
+                        $badgeStatus = $paymentStatus === 'approved' ? 'paid' : $paymentStatus;
+                        $paymentGroup = $badgeStatus;
+                        if (in_array($paymentStatus, ['pending', 'verifying'], true)) {
+                            $paymentGroup = 'verifying';
+                        } elseif (in_array($paymentStatus, ['paid', 'approved'], true)) {
+                            $paymentGroup = 'approved';
+                        }
+                    ?>
+                    <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>">
                         <td><?php echo date('d M Y', strtotime($payment['payment_date'])); ?></td>
                         <td><?php echo htmlspecialchars($payment['receipt_number']); ?></td>
                         <td><?php echo htmlspecialchars($payment['patient_name']); ?></td>
-                        <td><?php echo htmlspecialchars($payment['appointment_details']); ?></td>
+                        <td><?php echo htmlspecialchars($payment['appointment_code']); ?></td>
                         <td>RM <?php echo number_format($payment['amount'], 2); ?></td>
                         <td>
-                            <span class="status-badge status-<?php echo $payment['payment_status']; ?>">
-                                <?php echo ucfirst($payment['payment_status']); ?>
-                            </span>
+                            <?php echo badge($badgeStatus); ?>
                         </td>
                         <td>
                             <button class="btn-view" onclick="viewReceipt('<?php echo $payment['receipt_image']; ?>')">
@@ -132,19 +140,26 @@ $payments = get_all_payments();
     background: var(--surface);
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
     color: var(--text);
 }
 
 .tab-btn.active {
-    background: var(--primary);
-    color: white;
-    border-color: var(--primary);
+    background: rgba(124,51,73,0.15);
+    color: var(--primary);
+    border-color: rgba(124,51,73,0.15);
 }
 
 .tab-btn:hover:not(.active) {
-    border-color: var(--primary);
-    color: var(--primary);
+    background: var(--surface2);
+    border-color: var(--border);
+    color: var(--text);
+}
+
+.tab-btn:active,
+.btn-view:active,
+.btn-view-details:active {
+    background: rgba(124,51,73,0.15);
 }
 
 .payments-table-container {
@@ -208,6 +223,7 @@ $payments = get_all_payments();
     cursor: pointer;
     font-size: 12px;
     border: none;
+    transition: background 0.15s, color 0.15s;
 }
 
 .btn-view {
@@ -216,7 +232,7 @@ $payments = get_all_payments();
 }
 
 .btn-view:hover {
-    background: var(--primary-dark);
+    background: rgba(124,51,73,0.85);
 }
 
 .btn-view-details {
@@ -225,7 +241,7 @@ $payments = get_all_payments();
 }
 
 .btn-view-details:hover {
-    background: var(--teal-light);
+    background: rgba(42,127,127,0.85);
 }
 
 .alert-info {
