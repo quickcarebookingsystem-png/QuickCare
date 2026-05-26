@@ -734,7 +734,7 @@ function render_stats($role) {
     $pendingPayments = count_appointments($conn, 'user', ["payment_status = ?"], 's', ['pending']);
 
     $todayAppointments = count_appointments($conn, null, ["appointment_date = CURDATE()", "appointment_status <> ?"], 's', ['cancelled']);
-    $pendingReview = count_appointments($conn, null, ["appointment_status = ?"], 's', ['pending']);
+    $pendingReview = count_appointments($conn, null, ["appointment_status IN ('pending', 'confirm', 'confirmed')"]);
     $confirmed = count_appointments($conn, null, ["appointment_status = ?"], 's', ['confirmed']);
     $totalUsers = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ?", 's', ['user'])[0]['total'] ?? 0);
 
