@@ -148,12 +148,19 @@ function redirect_to($url) {
 }
 
 function protect_page() {
+    global $conn;
 
     header("Cache-Control: no-cache, no-store, must-revalidate");
     header("Pragma: no-cache");
     header("Expires: 0");
 
     if (!isset($_SESSION['id'])) {
+        redirect_to(app_url('login.php'));
+    }
+
+    if (isset($conn) && !current_user($conn)) {
+        session_unset();
+        session_destroy();
         redirect_to(app_url('login.php'));
     }
 }
@@ -692,6 +699,9 @@ function render_dashboard($role) {
 function render_sidebar($conn, $role, $page) {
     global $NAVS;
     $user = current_user($conn);
+    if (!$user) {
+        redirect_to(app_url('login.php'));
+    }
     echo '<aside class="sidebar" id="sidebar"><div class="sidebar-header"><div class="sidebar-logo"><div class="logo-icon">🏥</div><span>QuickCare</span></div>';
     echo '<div class="sidebar-role">' . e($user['role']) . ' Portal</div></div><nav class="sidebar-nav">';
     foreach ($NAVS[$role] ?? [] as $section) {
@@ -753,6 +763,9 @@ function badge($status) {
 function render_profile($role) {
     global $conn;
     $u = current_user($conn);
+    if (!$u) {
+        redirect_to(app_url('login.php'));
+    }
     $accountStatus = strtolower((string)($u['user_status'] ?? 'inactive')) === 'active' ? 'active' : 'inactive';
     echo '<div class="profile-header"><div class="profile-avatar-lg">' . e(name_avatar($u['name'] ?? '')) . '</div><div><div class="profile-name">' . e($u['name']) . '</div><div class="profile-meta">' . e($u['role'] . ' · ID: ' . $u['user_code']) . '</div><div style="margin-top:8px"><span class="badge badge-' . e($accountStatus) . '">• ' . e(ucfirst($accountStatus)) . '</span></div></div><button class="btn btn-outline" style="margin-left:auto" onclick="openModal(\'modal-edit-profile\')">✏️ Edit Profile</button></div>';
     echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Personal Information</span></div><div class="card-body"><div style="display:flex;flex-direction:column;gap:12px">';
