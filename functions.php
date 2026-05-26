@@ -790,44 +790,232 @@ function render_profile($role) {
     echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Change Password</span></div><div class="card-body"><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="change_password"><div class="form-group"><label>Current Password</label><input class="form-control" type="password" name="current_password" required></div><div class="form-group"><label>New Password</label><input class="form-control" type="password" name="new_password" required></div><div class="form-group"><label>Confirm Password</label><input class="form-control" type="password" name="confirm_password" required></div><button class="btn btn-primary" style="width:auto">Update Password</button></form></div></div></div>';
 }
 
-function render_services($role) {
+function render_services($role, $showToolbar = true) {
     global $conn;
     $services = get_services($conn);
-    echo '<div class="toolbar">
-            <div class="search-input-wrap">
-                <span class="search-icon">🔍</span>
-                <input class="form-control" type="text" placeholder="Search services…">
-          </div>';
-    if ($role === 'admin') {
-        echo '<button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-service\')">
-                + Add Service
-              </button>';
+    if ($showToolbar) {
+        echo '<div class="toolbar">
+                <div class="search-input-wrap">
+                    <span class="search-icon">🔍</span>
+                    <input class="form-control" type="text" placeholder="Search services…" id="searchServiceInput">
+              </div>';
+        if ($role === 'admin') {
+            echo '<button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-service\')">
+                    + Add Service
+                  </button>';
+        }
+        echo '</div>';
     }
-    echo '</div><div class="services-grid">';
+    echo '<div class="services-grid" id="servicesGrid">';
     foreach ($services as $s) {
-        echo '<div class="service-card">
+        $name = strtolower($s['service_name']);
+        $longDesc = $s['service_description'];
+
+        if (str_contains($name, 'general check-up')) {
+            $longDesc = "Our comprehensive General Check-up is designed for total health awareness and proactive wellness management. This service includes a full physical examination, vital signs monitoring (blood pressure, heart rate, BMI), and a personalized consultation with our experienced medical practitioners. We focus on early detection of potential health risks and chronic conditions, providing you with professional guidance on maintaining a healthy lifestyle through preventive care tailored to your specific age, gender, and medical history. Regular check-ups are the cornerstone of long-term health, helping you stay ahead of any issues before they become serious.";
+        } elseif (str_contains($name, 'dental care')) {
+            $longDesc = "Maintain a bright, confident, and healthy smile with our professional Dental Care services. This comprehensive oral health package covers routine clinical examinations, professional scaling and polishing to remove stubborn plaque and tartar, and detailed screening for gum disease, cavities, or other oral issues. Our dental experts utilize state-of-the-art equipment and gentle techniques to ensure your comfort while keeping your oral hygiene at its peak. Beyond treatment, we provide personalized advice on effective brushing, flossing, and long-term dental health maintenance to prevent future complications and ensure your smile lasts a lifetime.";
+        } elseif (str_contains($name, 'eye examination')) {
+            $longDesc = "Vision is vital to your daily quality of life. Our professional Eye Examination service provides a thorough assessment of your visual acuity and overall ocular health using specialized diagnostic equipment. We screen for common vision problems such as refractive errors (nearsightedness, farsightedness, astigmatism) as well as more serious conditions like glaucoma, cataracts, and diabetic retinopathy. Whether you require a new prescription for corrective lenses or a routine preventative health check for your eyes, our specialists ensure precise testing and professional care. We prioritize preserving your sight and helping you see the world clearly at every stage of life.";
+        } elseif (str_contains($name, 'vaccination')) {
+            $longDesc = "Protect yourself and your loved ones from preventable diseases with our professional Vaccination services. We offer a wide range of essential immunizations, including seasonal flu shots, travel vaccines for international trips, and standard boosters for adults and children. Our clinical team strictly adheres to national health guidelines for vaccine administration and temperature-controlled storage, ensuring maximum efficacy and safety. We provide a clean, safe environment for your injections and provide accurate, detailed documentation for your permanent medical immunization records. Stay protected and contribute to community health by keeping your vaccines up to date with QuickCare.";
+        } elseif (str_contains($name, 'blood test')) {
+            $longDesc = "Gain deep, data-driven insights into your internal health with our diagnostic Blood Test services. We provide accurate laboratory analysis for a wide array of critical health markers, including full blood counts, lipid profiles (cholesterol/triglycerides), blood glucose levels for diabetes screening, and specialized kidney or liver function tests. Our collection process is quick, professional, and designed to be as painless as possible. Once processed, the results are interpreted by our medical staff, who will walk you through the findings to help you monitor existing conditions or detect silent health issues early. Regular blood screening is an essential tool for effective health management.";
+        } elseif (str_contains($name, 'cardiology')) {
+            $longDesc = "Our specialized Cardiology screening focuses on the most important muscle in your body—your heart. This comprehensive service includes thorough cardiovascular risk assessments, blood pressure management, and in-depth consultations regarding your heart health history and lifestyle. We utilize modern diagnostic tools to evaluate cardiac function and identify potential issues such as arrhythmias, hypertension, or coronary artery disease. By catching early warning signs of cardiovascular stress, we help you take proactive, life-saving steps toward a heart-healthy future. Our specialists provide you with a clear roadmap for heart health, including diet and exercise recommendations tailored to your cardiac profile.";
+        }
+
+        echo '<div class="service-card" style="cursor:pointer" onclick="showServiceDetails(this)" 
+                   data-name="' . e($s['service_name']) . '" 
+                   data-icon="' . e($s['service_icon']) . '" 
+                   data-price="RM ' . e(number_format((float) $s['service_price'], 2)) . '" 
+                   data-desc="' . e($longDesc) . '">
                 <span class="service-icon">' . e($s['service_icon']) . '</span>
                 <div class="service-name">' . e($s['service_name']) . '</div>
                 <div class="service-price">RM ' . e(number_format((float) $s['service_price'], 2)) . '</div>
                 <div class="service-desc">' . e($s['service_description']) . '</div>
               </div>';
     }
-    echo '</div>';
+    echo '</div>
+    <div class="modal-overlay" id="modal-service-details">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">Service Details</span>
+                <button class="modal-close" onclick="closeModal(\'modal-service-details\')">×</button>
+            </div>
+            <div class="modal-body" style="text-align:center">
+                <div id="serviceDetailIcon" style="font-size: 3.5rem; margin-bottom: 12px;"></div>
+                <h2 id="serviceDetailName" style="margin-bottom: 4px;"></h2>
+                <div id="serviceDetailPrice" style="color: var(--primary); font-weight: 600; font-size: 1.2rem; margin-bottom: 20px;"></div>
+                <div class="divider" style="margin-bottom: 24px;"></div>
+                <div style="text-align: left; background: var(--surface2); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
+                    <h4 style="margin-top: 0; margin-bottom: 12px; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                        <span>📋</span> Service Overview
+                    </h4>
+                    <p id="serviceDetailDesc" style="line-height: 1.7; color: var(--text-muted); white-space: pre-wrap; font-size: 0.95rem; margin: 0;"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+    if (typeof openModal !== "function") { window.openModal = function(id) { document.getElementById(id).classList.add("active"); }; }
+    if (typeof closeModal !== "function") { window.closeModal = function(id) { document.getElementById(id).classList.remove("active"); }; }
+    function showServiceDetails(el) {
+        document.getElementById("serviceDetailIcon").textContent = el.dataset.icon;
+        document.getElementById("serviceDetailName").textContent = el.dataset.name;
+        document.getElementById("serviceDetailPrice").textContent = el.dataset.price;
+        document.getElementById("serviceDetailDesc").textContent = el.dataset.desc;
+        openModal("modal-service-details");
+    }
+    document.getElementById("searchServiceInput")?.addEventListener("input", function() {
+        const q = this.value.toLowerCase();
+        document.querySelectorAll("#servicesGrid .service-card").forEach(c => {
+            c.style.display = c.innerText.toLowerCase().includes(q) ? "" : "none";
+        });
+    });
+    </script>';
 }
 
-function render_doctors($role) {
+function render_doctors($role, $showToolbar = true) {
     global $conn;
     $doctors = get_doctors($conn);
-    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search doctors…"></div>';
-    if ($role === 'admin') echo '<button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-doctor\')">+ Add Doctor</button>';
-    echo '</div><div class="doctor-grid">';
+    if ($showToolbar) {
+        echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search doctors…" id="searchDoctorInput"></div>';
+        if ($role === 'admin') echo '<button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-doctor\')">+ Add Doctor</button>';
+        echo '</div>';
+    }
+    echo '<div class="doctor-grid" id="doctorsGrid">';
     foreach ($doctors as $d) {
         $available = $d['available_days'] ?: 'Not scheduled';
-        echo '<div class="doctor-card"><div class="doctor-avatar">' . e($d['doctor_icon']) . '</div><div class="doctor-name">' . e($d['doctor_name']) . '</div><div class="doctor-spec">' . e($d['doctor_specialist']) . '</div><div class="doctor-avail">✅ Available ' . e($available) . '</div>';
+
+        $spec = strtolower($d['doctor_specialist']);
+        $description = "Highly qualified medical professional dedicated to providing expert care and specialized treatment within their field of expertise.";
+        if (str_contains($spec, 'cardiology')) {
+            $description = "Specializes in diagnosing and treating diseases of the cardiovascular system. This includes managing heart conditions such as coronary artery disease, heart failure, and heart rhythm disorders through advanced diagnostic tools and therapeutic interventions.";
+        } elseif (str_contains($spec, 'dental')) {
+            $description = "Expert in oral health care, focusing on the diagnosis, prevention, and treatment of conditions affecting the teeth, gums, and mouth. Provides comprehensive services ranging from preventive care and restorative treatments to complex dental surgeries and cosmetic procedures.";
+        } elseif (str_contains($spec, 'eye') || str_contains($spec, 'ophthalmology')) {
+            $description = "Dedicated to comprehensive eye health and vision care. Expertise includes conducting detailed eye examinations, diagnosing ocular diseases, and performing specialized treatments or surgeries to preserve and enhance patient eyesight.";
+        }
+
+        echo '<div class="doctor-card" style="cursor:pointer" onclick="showDoctorDetails(this)" 
+                   data-name="' . e($d['doctor_name']) . '" 
+                   data-icon="' . e($d['doctor_icon']) . '" 
+                   data-spec="' . e($d['doctor_specialist']) . '" 
+                   data-avail="Available ' . e($available) . '" 
+                   data-desc="' . e($description) . '">
+                <div class="doctor-avatar">' . e($d['doctor_icon']) . '</div>
+                <div class="doctor-name">' . e($d['doctor_name']) . '</div>
+                <div class="doctor-spec">' . e($d['doctor_specialist']) . '</div>
+                <div class="doctor-avail">✅ Available ' . e($available) . '</div>';
         if ($role === 'admin') echo '<div style="margin-top:12px;display:flex;gap:6px;justify-content:center"><button class="btn btn-sm btn-outline" onclick="openModal(\'modal-add-doctor\')">✏️</button><a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'doctor', 'id' => $d['doctor_id']])) . '">🗑</a></div>';
         echo '</div>';
     }
-    echo '</div>';
+    echo '</div>
+    <div class="modal-overlay" id="modal-doctor-details">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">Doctor Profile</span>
+                <button class="modal-close" onclick="closeModal(\'modal-doctor-details\')">×</button>
+            </div>
+            <div class="modal-body" style="text-align:center">
+                <div id="doctorDetailAvatar" class="doctor-avatar" style="width: 80px; height: 80px; font-size: 2rem; margin: 0 auto 16px;"></div>
+                <h2 id="doctorDetailName" style="margin-bottom: 4px;"></h2>
+                <div id="doctorDetailSpec" style="color: var(--primary); font-weight: 500; font-size: 1.1rem; margin-bottom: 8px;"></div>
+                <div id="doctorDetailAvail" style="font-size: 0.9rem; color: var(--success); margin-bottom: 24px;"></div>
+                <div class="divider" style="margin-bottom: 24px;"></div>
+                <div style="text-align: left; background: var(--surface2); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
+                    <h4 style="margin-top: 0; margin-bottom: 12px; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                        <span>🩺</span> About the Specialist
+                    </h4>
+                    <p id="doctorDetailDesc" style="line-height: 1.7; color: var(--text-muted); white-space: pre-wrap; font-size: 0.95rem; margin: 0;"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+    if (typeof openModal !== "function") { window.openModal = function(id) { document.getElementById(id).classList.add("active"); }; }
+    if (typeof closeModal !== "function") { window.closeModal = function(id) { document.getElementById(id).classList.remove("active"); }; }
+    function showDoctorDetails(el) {
+        document.getElementById("doctorDetailAvatar").textContent = el.dataset.icon;
+        document.getElementById("doctorDetailName").textContent = el.dataset.name;
+        document.getElementById("doctorDetailSpec").textContent = el.dataset.spec;
+        document.getElementById("doctorDetailAvail").textContent = el.dataset.avail;
+        document.getElementById("doctorDetailDesc").textContent = el.dataset.desc;
+        openModal("modal-doctor-details");
+    }
+    document.getElementById("searchDoctorInput")?.addEventListener("input", function() {
+        const q = this.value.toLowerCase();
+        document.querySelectorAll("#doctorsGrid .doctor-card").forEach(c => {
+            c.style.display = c.innerText.toLowerCase().includes(q) ? "" : "none";
+        });
+    });
+    </script>';
+}
+
+function render_features() {
+    $features = [
+        [
+            'name' => 'Patient Registration',
+            'icon' => '👤',
+            'desc' => 'Create a profile so your clinic details are ready when needed.',
+            'long' => 'Create your QuickCare profile in minutes. Securely store your personal details, emergency contacts, and medical preferences so they are ready whenever you book a visit. Our streamlined registration process ensures your information is accurately captured for better healthcare delivery.'
+        ],
+        [
+            'name' => 'Appointment Booking',
+            'icon' => '📅',
+            'desc' => 'Request visits and keep appointment information organized.',
+            'long' => 'Skip the phone calls and book your appointments online 24/7. Browse through our list of specialists, check their real-time availability, and select a time slot that fits your schedule. You can manage, reschedule, or cancel your appointments directly from your patient dashboard.'
+        ],
+        [
+            'name' => 'Clinic Access',
+            'icon' => '🏥',
+            'desc' => 'Use one website to start and continue your healthcare journey.',
+            'long' => 'Gain immediate access to our full suite of specialized healthcare services. Whether you need a routine check-up or specialized care in cardiology or dentistry, our integrated system connects you with the right professionals and resources to support your health journey.'
+        ]
+    ];
+
+    echo '<div class="services-grid landing-services">';
+    foreach ($features as $f) {
+        echo '<article class="service-card" style="cursor:pointer" onclick="showFeatureDetails(this)" 
+                       data-name="' . e($f['name']) . '" 
+                       data-icon="' . e($f['icon']) . '" 
+                       data-desc="' . e($f['long']) . '">
+                <span class="service-icon">' . e($f['icon']) . '</span>
+                <div class="service-name">' . e($f['name']) . '</div>
+                <p class="service-desc">' . e($f['desc']) . '</p>
+              </article>';
+    }
+    echo '</div>
+    <div class="modal-overlay" id="modal-feature-details">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title">Feature Details</span>
+                <button class="modal-close" onclick="closeModal(\'modal-feature-details\')">×</button>
+            </div>
+            <div class="modal-body" style="text-align:center">
+                <div id="featureDetailIcon" style="font-size: 3.5rem; margin-bottom: 12px;"></div>
+                <h2 id="featureDetailName" style="margin-bottom: 24px;"></h2>
+                <div class="divider" style="margin-bottom: 24px;"></div>
+                <div style="text-align: left; background: var(--surface2); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
+                    <h4 style="margin-top: 0; margin-bottom: 12px; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                        <span>✨</span> Feature Overview
+                    </h4>
+                    <p id="featureDetailDesc" style="line-height: 1.7; color: var(--text-muted); white-space: pre-wrap; font-size: 0.95rem; margin: 0;"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+    if (typeof openModal !== "function") { window.openModal = function(id) { document.getElementById(id).classList.add("active"); }; }
+    if (typeof closeModal !== "function") { window.closeModal = function(id) { document.getElementById(id).classList.remove("active"); }; }
+    function showFeatureDetails(el) {
+        document.getElementById("featureDetailIcon").textContent = el.dataset.icon;
+        document.getElementById("featureDetailName").textContent = el.dataset.name;
+        document.getElementById("featureDetailDesc").textContent = el.dataset.desc;
+        openModal("modal-feature-details");
+    }
+    </script>';
 }
 
 function appointment_actions($role, $a) {

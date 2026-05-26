@@ -43,19 +43,8 @@ $doctors = get_doctors($conn);
         <p>Our team of highly qualified specialists is dedicated to providing the best healthcare services for you and your family.</p>
       </div>
 
-      <div class="doctor-grid" style="max-width: 1120px; margin: 0 auto;">
-        <?php if (empty($doctors)): ?>
-          <p class="text-muted text-center" style="grid-column: 1 / -1;">No doctors found.</p>
-        <?php endif; ?>
-
-        <?php foreach ($doctors as $doctor): ?>
-          <div class="doctor-card">
-            <div class="doctor-avatar"><?php echo e($doctor['doctor_icon'] ?: 'DR'); ?></div>
-            <div class="doctor-name"><?php echo e($doctor['doctor_name']); ?></div>
-            <div class="doctor-spec"><?php echo e($doctor['doctor_specialist']); ?></div>
-            <div class="doctor-avail">Available <?php echo e($doctor['available_days'] ?: '-'); ?></div>
-          </div>
-        <?php endforeach; ?>
+      <div style="max-width: 1120px; margin: 0 auto;">
+        <?php render_doctors('guest', false); ?>
       </div>
     </section>
 

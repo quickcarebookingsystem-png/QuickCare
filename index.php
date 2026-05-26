@@ -83,29 +83,19 @@ app_header('QuickCare - Clinic Booking System');
 
     <section class="landing-section">
       <div class="landing-section-heading">
-        <h2>What QuickCare Provides</h2>
+        <h2>System Features</h2>
         <p>Focused tools for patients who want a smoother clinic booking experience.</p>
       </div>
+      <?php render_features(); ?>
+    </section>
 
-      <div class="services-grid landing-services">
-        <article class="service-card">
-          <span class="service-icon">+</span>
-          <div class="service-name">Patient Registration</div>
-          <p class="service-desc">Create a profile so your clinic details are ready when needed.</p>
-        </article>
-
-        <article class="service-card">
-          <span class="service-icon">+</span>
-          <div class="service-name">Appointment Booking</div>
-          <p class="service-desc">Request visits and keep appointment information organized.</p>
-        </article>
-
-        <article class="service-card">
-          <span class="service-icon">+</span>
-          <div class="service-name">Clinic Access</div>
-          <p class="service-desc">Use one website to start and continue your healthcare journey.</p>
-        </article>
+    <section class="landing-section" id="services">
+      <div class="landing-section-heading">
+        <span class="landing-kicker">Our Specializations</span>
+        <h2>Clinic Services</h2>
+        <p>Comprehensive healthcare solutions tailored to your needs.</p>
       </div>
+      <?php render_services('guest', false); ?>
     </section>
 
     <section class="landing-cta">
