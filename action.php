@@ -382,6 +382,85 @@ if ($action === 'save_profile' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset
     $_SESSION['name'] = $name;
 }
 
+if ($action === 'save_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $name = trim($_POST['name'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $password = trim($_POST['password'] ?? '');
+    $phoneNumber = format_phone_number($_POST['phone_number'] ?? '');
+    $role = 'staff';
+    $back = $_SERVER['HTTP_REFERER'] ?? page_url('staff', 'admin');
+
+    if ($name === '' || $email === '' || $password === '') {
+        $_SESSION['QuickCare_message'] = 'Please fill in staff name, email, and password.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
+
+    if (email_exist($conn, $email)) {
+        $_SESSION['QuickCare_message'] = 'Email already registered.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
+
+    $stmt = $conn->prepare("
+        SELECT MAX(CAST(SUBSTRING(user_code, 2) AS UNSIGNED)) AS max_id
+        FROM users
+        WHERE role = ?
+    ");
+    $stmt->bind_param("s", $role);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    $nextId = ((int)($row['max_id'] ?? 0)) + 1;
+    $userCode = 'S' . str_pad($nextId, 3, '0', STR_PAD_LEFT);
+    $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+    $userStatus = 'inactive';
+
+    $stmt = $conn->prepare("
+        INSERT INTO users (user_code, name, email, password, role, phone_number, user_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ");
+    $stmt->bind_param("sssssss", $userCode, $name, $email, $hashedPassword, $role, $phoneNumber, $userStatus);
+    $stmt->execute();
+    $stmt->close();
+}
+
+if ($action === 'update_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $id = (int)($_POST['id'] ?? 0);
+    $name = trim($_POST['name'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $phoneNumber = format_phone_number($_POST['phone_number'] ?? '');
+    $back = $_SERVER['HTTP_REFERER'] ?? page_url('staff', 'admin');
+
+    if ($id <= 0 || $name === '' || $email === '') {
+        $_SESSION['QuickCare_message'] = 'Please fill in staff name and email.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
+
+    $stmt = $conn->prepare("SELECT user_id FROM users WHERE email = ? AND user_id <> ?");
+    $stmt->bind_param("si", $email, $id);
+    $stmt->execute();
+    $existing = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if ($existing) {
+        $_SESSION['QuickCare_message'] = 'Email already registered.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
+
+    $stmt = $conn->prepare("
+        UPDATE users
+        SET name = ?, email = ?, phone_number = ?
+        WHERE user_id = ? AND role = 'staff'
+    ");
+    $stmt->bind_param("sssi", $name, $email, $phoneNumber, $id);
+    $stmt->execute();
+    $stmt->close();
+}
+
 if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $user = current_user($conn);
     $serviceInput = $_POST['service'] ?? '';
@@ -534,6 +613,21 @@ if (in_array($action, ['cancel_appointment', 'approve', 'reject', 'update_status
 
     if ($appointmentCode !== '') {
         if ($appointment_status === 'completed') {
+            $stmt = $conn->prepare("SELECT appointment_date, appointment_time FROM appointments WHERE appointment_code = ?");
+            $stmt->bind_param("s", $appointmentCode);
+            $stmt->execute();
+            $appointment = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+
+            if (!$appointment || !appointment_time_has_passed($appointment['appointment_date'] ?? '', $appointment['appointment_time'] ?? '')) {
+                $_SESSION['QuickCare_message'] = 'Appointment can only be completed after the appointment date and time has passed.';
+                $_SESSION['QuickCare_message_type'] = 'error';
+                $back = $_SERVER['HTTP_REFERER'] ?? page_url('dashboard');
+                redirect_to($back);
+            }
+        }
+
+        if ($appointment_status === 'completed') {
             $stmt = $conn->prepare("UPDATE appointments SET appointment_status = ?, payment_status = 'paid' WHERE appointment_code = ?");
         } elseif ($appointment_status === 'cancelled') {
             $stmt = $conn->prepare("UPDATE appointments SET appointment_status = ?, payment_status = CASE WHEN payment_status = 'pending' THEN 'unpaid' ELSE payment_status END WHERE appointment_code = ?");
@@ -581,12 +675,18 @@ if ($action === 'delete') {
         $stmt->bind_param("i", $id);
         $stmt->execute();
         $stmt->close();
+    } elseif ($type === 'staff' && $id > 0) {
+        $stmt = $conn->prepare("DELETE FROM users WHERE user_id = ? AND role = 'staff'");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $stmt->close();
     }
 }
 
 $message = match ($action) {
     'save_profile' => 'Profile updated successfully.',
     'save_staff' => 'Staff member saved successfully.',
+    'update_staff' => 'Staff member updated successfully.',
     'save_doctor' => 'Doctor saved successfully.',
     'save_service' => 'Service saved successfully.',
     'save_appointment_notes' => 'Appointment notes updated.',
@@ -596,6 +696,7 @@ $message = match ($action) {
     'update_status' => 'Status updated.',
     'process_payment' => 'Payment processed successfully.',
     'export_report' => 'Report exported.',
+    'delete' => 'Deleted successfully.',
     'submit_payment' => 'Payment submitted successfully. Please wait for admin approval.',
     'approve_payment' => 'Payment has been approved. Email sent to patient.',
     'reject_payment' => 'Payment has been rejected. Email sent to patient.',

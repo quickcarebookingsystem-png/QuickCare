@@ -455,6 +455,15 @@ function format_time_display($time) {
     return date('H:i', strtotime($time));
 }
 
+function appointment_time_has_passed($date, $time) {
+    if (empty($date) || empty($time)) {
+        return false;
+    }
+
+    $appointmentTimestamp = strtotime($date . ' ' . $time);
+    return $appointmentTimestamp !== false && $appointmentTimestamp <= time();
+}
+
 function app_header($title) {
     echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">';
     echo '<title>' . e($title) . '</title>';
@@ -855,7 +864,11 @@ function appointment_actions($role, $a) {
         return '<div class="appt-action-menu"><button type="button" class="appt-menu-trigger" onclick="toggleAppointmentMenu(event, this)" aria-label="Appointment actions">...</button><div class="appt-menu-list">' . implode('', $menuItems) . '</div></div>';
     }
     if (in_array($role, ['admin', 'staff'], true) && !in_array($appointmentStatus, ['completed', 'cancelled', 'rejected'], true)) {
-        return '<a class="btn btn-sm btn-teal" href="' . e(action_url('update_status', ['id' => $appointmentId])) . '">Update</a> <a class="btn btn-sm btn-danger" href="' . e(action_url('cancel_appointment', ['id' => $appointmentId])) . '">Cancel</a>';
+        $canComplete = appointment_time_has_passed($a['appointment_date'] ?? '', $a['appointment_time'] ?? '');
+        $completeAction = $canComplete
+            ? '<a class="btn btn-sm btn-teal" href="' . e(action_url('update_status', ['id' => $appointmentId])) . '">Complete</a>'
+            : '<span class="text-muted text-sm">-</span>';
+        return $completeAction . ' <a class="btn btn-sm btn-danger" href="' . e(action_url('cancel_appointment', ['id' => $appointmentId])) . '">Cancel</a>';
     }
     return '<span class="text-muted text-sm">No actions</span>';
 }
@@ -1435,11 +1448,41 @@ function render_reports() {
 }
 
 function render_staff() {
-    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search staff…"></div><button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-staff\')">+ Add Staff</button></div><div class="card"><div class="card-body" style="padding:0"><table><thead><tr><th>Name</th><th>Role</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-    foreach ([['Nurul Ain binti Razak','Staff','nurul@QuickCare.my','active'], ['Hafizi bin Ahmad','Staff','hafizi@QuickCare.my','active'], ['Siti Rahimah','Staff','siti@QuickCare.my','pending']] as $s) {
-        echo '<tr><td>' . e($s[0]) . '</td><td>' . e($s[1]) . '</td><td>' . e($s[2]) . '</td><td>' . badge($s[3]) . '</td><td class="flex gap-8"><button class="btn btn-sm btn-outline" onclick="openModal(\'modal-add-staff\')">✏️ Edit</button><a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'staff'])) . '">🗑 Delete</a></td></tr>';
+    global $conn;
+    $staff = fetch_all_assoc(
+        $conn,
+        "SELECT user_id, user_code, name, email, phone_number, user_status
+         FROM users
+         WHERE role = ?
+         ORDER BY user_code ASC",
+        's',
+        ['staff']
+    );
+
+    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search staff…" id="searchStaff"></div><button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-staff\')">+ Add Staff</button></div><div class="card"><div class="card-body" style="padding:0"><table><thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Email</th><th>Phone</th><th>Status</th><th>Actions</th></tr></thead><tbody id="staffTableBody">';
+    if (empty($staff)) {
+        echo '<tr><td colspan="7" style="text-align:center">No staff found.</td></tr>';
+    }
+    foreach ($staff as $s) {
+        $status = strtolower($s['user_status'] ?? 'inactive') === 'active' ? 'active' : 'inactive';
+        echo '<tr><td>' . e($s['user_code']) . '</td><td>' . e($s['name']) . '</td><td>Staff</td><td>' . e($s['email']) . '</td><td>' . e(format_phone_number($s['phone_number'] ?? '')) . '</td><td>' . badge($status) . '</td><td class="flex gap-8"><button type="button" class="btn btn-sm btn-outline" onclick="openEditStaffModal(this)" data-id="' . e($s['user_id']) . '" data-name="' . e($s['name']) . '" data-email="' . e($s['email']) . '" data-phone="' . e(format_phone_number($s['phone_number'] ?? '')) . '">✏️ Edit</button><a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'staff', 'id' => $s['user_id']])) . '" onclick="return confirm(\'Delete this staff member?\')">🗑 Delete</a></td></tr>';
     }
     echo '</tbody></table></div></div>';
+    echo '<script>
+    document.getElementById("searchStaff")?.addEventListener("input", function () {
+        const query = this.value.toLowerCase();
+        document.querySelectorAll("#staffTableBody tr").forEach(row => {
+            row.style.display = row.innerText.toLowerCase().includes(query) ? "" : "none";
+        });
+    });
+    function openEditStaffModal(button) {
+        document.getElementById("editStaffId").value = button.dataset.id || "";
+        document.getElementById("editStaffName").value = button.dataset.name || "";
+        document.getElementById("editStaffEmail").value = button.dataset.email || "";
+        document.getElementById("editStaffPhone").value = button.dataset.phone || "";
+        openModal("modal-edit-staff");
+    }
+    </script>';
 }
 
 // ============================================
@@ -1452,7 +1495,7 @@ function render_schedule() {
     $doctors = get_doctors($conn);
     $appointments = fetch_all_assoc(
         $conn,
-        "SELECT appointment_code, name, doctor_name, service_name, appointment_time, appointment_status
+        "SELECT appointment_code, name, doctor_name, service_name, appointment_date, appointment_time, appointment_status
          FROM appointments
          WHERE appointment_date = ? AND appointment_status <> 'cancelled'
          ORDER BY appointment_time ASC",
@@ -1469,7 +1512,8 @@ function render_schedule() {
         echo '<tr><td colspan="6" style="text-align:center">No appointments found.</td></tr>';
     }
     foreach ($appointments as $row) {
-        $action = in_array($row['appointment_status'], ['completed', 'cancelled', 'rejected'], true)
+        $canComplete = appointment_time_has_passed($row['appointment_date'] ?? '', $row['appointment_time'] ?? '');
+        $action = in_array($row['appointment_status'], ['completed', 'cancelled', 'rejected'], true) || !$canComplete
             ? '<span class="text-muted">-</span>'
             : '<a class="btn btn-sm btn-teal" href="' . e(action_url('update_status', ['id' => $row['appointment_code']])) . '">Complete</a>';
         echo '<tr><td>' . e(format_time_display($row['appointment_time'])) . '</td><td>' . e($row['name']) . '</td><td>' . e($row['doctor_name']) . '</td><td>' . e($row['service_name']) . '</td><td>' . badge($row['appointment_status']) . '</td><td>' . $action . '</td></tr>';
@@ -1600,7 +1644,8 @@ function render_modals() {
     $bloodType = $user['blood_type'] ?? '';
 
     echo <<<'HTML'
-<div class="modal-overlay" id="modal-add-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Add Staff Member</span><button class="modal-close" onclick="closeModal('modal-add-staff')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_staff"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" placeholder="e.g. Nurul Ain binti Razak"></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" placeholder="staff@QuickCare.my"></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone"></div><div class="form-group"><label>Role</label><select class="form-control" name="role"><option>Staff</option><option>Admin</option></select></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
+<div class="modal-overlay" id="modal-add-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Add Staff Member</span><button class="modal-close" onclick="closeModal('modal-add-staff')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_staff"><input type="hidden" name="role" value="staff"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" placeholder="e.g. Nurul Ain binti Razak" required></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" placeholder="staff@QuickCare.my" required></div><div class="form-group"><label>Password</label><input class="form-control" type="password" name="password" required></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone_number" data-phone-format placeholder="+60 12-345 6789"></div><div class="form-group"><label>Role</label><input class="form-control" value="Staff" readonly></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
+<div class="modal-overlay" id="modal-edit-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Staff Member</span><button class="modal-close" onclick="closeModal('modal-edit-staff')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="update_staff"><input type="hidden" name="id" id="editStaffId"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" id="editStaffName" required></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" id="editStaffEmail" required></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone_number" id="editStaffPhone" data-phone-format placeholder="+60 12-345 6789"></div><div class="form-group"><label>Role</label><input class="form-control" value="Staff" readonly></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-edit-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save Changes</button></div></form></div></div>
 <div class="modal-overlay" id="modal-add-doctor"><div class="modal"><div class="modal-header"><span class="modal-title">Add Doctor</span><button class="modal-close" onclick="closeModal('modal-add-doctor')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_doctor"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" placeholder="e.g. Dr. Ahmad Fauzi"></div><div class="form-group"><label>Specialization</label><input class="form-control" name="specialization"></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email"></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-doctor')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 <div class="modal-overlay" id="modal-add-service"><div class="modal"><div class="modal-header"><span class="modal-title">Add Service</span><button class="modal-close" onclick="closeModal('modal-add-service')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_service"><div class="modal-body"><div class="form-group"><label>Service Name</label><input class="form-control" name="name"></div><div class="form-group"><label>Fee (RM)</label><input class="form-control" type="number" name="fee"></div><div class="form-group"><label>Description</label><textarea class="form-control" name="description" rows="3"></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-service')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 HTML;
