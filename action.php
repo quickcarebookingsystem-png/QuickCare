@@ -654,6 +654,178 @@ if ($action === 'save_service' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+if ($action === 'export_report') {
+    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+        redirect_to(app_url('login.php'));
+    }
+
+    $appointments = get_appointments($conn, null, null, null, true);
+    $appointmentSummary = fetch_all_assoc(
+        $conn,
+        "SELECT
+            COUNT(*) AS total,
+            SUM(appointment_status = 'completed') AS completed,
+            SUM(appointment_status IN ('confirmed', 'confirm')) AS pending,
+            SUM(appointment_status = 'cancelled') AS cancelled
+         FROM appointments"
+    )[0] ?? ['total' => 0, 'completed' => 0, 'pending' => 0, 'cancelled' => 0];
+    $appointmentMonthlyRows = fetch_all_assoc(
+        $conn,
+        "SELECT
+            DATE_FORMAT(appointment_date, '%M %Y') AS month_label,
+            COUNT(*) AS total,
+            SUM(appointment_status = 'completed') AS completed
+         FROM appointments
+         GROUP BY YEAR(appointment_date), MONTH(appointment_date)
+         ORDER BY YEAR(appointment_date) DESC, MONTH(appointment_date) DESC"
+    );
+    $paymentSummary = fetch_all_assoc(
+        $conn,
+        "SELECT
+            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
+            SUM(payment_status IN ('paid', 'approved')) AS paid_count,
+            COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'verifying') THEN amount ELSE 0 END), 0) AS pending_amount
+         FROM payments"
+    )[0] ?? ['revenue' => 0, 'paid_count' => 0, 'pending_amount' => 0];
+    $paymentMonthlyRows = fetch_all_assoc(
+        $conn,
+        "SELECT
+            DATE_FORMAT(payment_date, '%M %Y') AS month_label,
+            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
+            SUM(payment_status IN ('paid', 'approved')) AS invoices
+         FROM payments
+         GROUP BY YEAR(payment_date), MONTH(payment_date)
+         ORDER BY YEAR(payment_date) DESC, MONTH(payment_date) DESC"
+    );
+
+    $escapePdf = function ($text) {
+        $text = preg_replace('/[^\x20-\x7E]/', '', (string) $text);
+        return str_replace(['\\', '(', ')'], ['\\\\', '\(', '\)'], $text);
+    };
+    $pdfText = function ($x, $y, $text, $size = 10) use ($escapePdf) {
+        return "BT /F1 {$size} Tf {$x} {$y} Td (" . $escapePdf($text) . ") Tj ET\n";
+    };
+
+    $pages = [];
+    $content = '';
+    $y = 800;
+    $content .= $pdfText(50, $y, 'QuickCare Report', 18);
+    $y -= 24;
+    $content .= $pdfText(50, $y, 'Generated: ' . date('d M Y, H:i'), 10);
+    $y -= 34;
+    $content .= $pdfText(50, $y, 'Appointment Report', 14);
+    $y -= 22;
+    $content .= $pdfText(60, $y, 'Total: ' . (int)($appointmentSummary['total'] ?? 0), 10);
+    $content .= $pdfText(180, $y, 'Completed: ' . (int)($appointmentSummary['completed'] ?? 0), 10);
+    $content .= $pdfText(330, $y, 'Pending: ' . (int)($appointmentSummary['pending'] ?? 0), 10);
+    $content .= $pdfText(450, $y, 'Cancelled: ' . (int)($appointmentSummary['cancelled'] ?? 0), 10);
+    $y -= 30;
+    $content .= $pdfText(60, $y, 'Month', 10);
+    $content .= $pdfText(230, $y, 'Total', 10);
+    $content .= $pdfText(310, $y, 'Completed', 10);
+    $content .= $pdfText(430, $y, 'Rate', 10);
+    $y -= 18;
+    foreach ($appointmentMonthlyRows as $row) {
+        $total = (int)($row['total'] ?? 0);
+        $completed = (int)($row['completed'] ?? 0);
+        $rate = $total > 0 ? round(($completed / $total) * 100) : 0;
+        $content .= $pdfText(60, $y, $row['month_label'] ?? '', 10);
+        $content .= $pdfText(230, $y, $total, 10);
+        $content .= $pdfText(310, $y, $completed, 10);
+        $content .= $pdfText(430, $y, $rate . '%', 10);
+        $y -= 16;
+    }
+
+    $y -= 24;
+    $content .= $pdfText(50, $y, 'Payment Report', 14);
+    $y -= 22;
+    $content .= $pdfText(60, $y, 'Total Revenue: RM ' . number_format((float)($paymentSummary['revenue'] ?? 0), 2), 10);
+    $content .= $pdfText(250, $y, 'Paid Invoices: ' . (int)($paymentSummary['paid_count'] ?? 0), 10);
+    $content .= $pdfText(410, $y, 'Pending: RM ' . number_format((float)($paymentSummary['pending_amount'] ?? 0), 2), 10);
+    $y -= 30;
+    $content .= $pdfText(60, $y, 'Month', 10);
+    $content .= $pdfText(230, $y, 'Revenue', 10);
+    $content .= $pdfText(360, $y, 'Invoices', 10);
+    $y -= 18;
+    foreach ($paymentMonthlyRows as $row) {
+        $content .= $pdfText(60, $y, $row['month_label'] ?? '', 10);
+        $content .= $pdfText(230, $y, 'RM ' . number_format((float)($row['revenue'] ?? 0), 2), 10);
+        $content .= $pdfText(360, $y, (int)($row['invoices'] ?? 0), 10);
+        $y -= 16;
+    }
+    $pages[] = $content;
+
+    $content = '';
+    $y = 800;
+    $content .= $pdfText(50, $y, 'All Appointments', 16);
+    $y -= 28;
+    $content .= $pdfText(40, $y, 'Code', 8);
+    $content .= $pdfText(105, $y, 'Patient', 8);
+    $content .= $pdfText(210, $y, 'Doctor', 8);
+    $content .= $pdfText(325, $y, 'Date', 8);
+    $content .= $pdfText(390, $y, 'Time', 8);
+    $content .= $pdfText(440, $y, 'Status', 8);
+    $content .= $pdfText(500, $y, 'Payment', 8);
+    $y -= 16;
+    foreach ($appointments as $appointment) {
+        if ($y < 50) {
+            $pages[] = $content;
+            $content = '';
+            $y = 800;
+            $content .= $pdfText(50, $y, 'All Appointments', 16);
+            $y -= 28;
+        }
+        $content .= $pdfText(40, $y, $appointment['appointment_code'] ?? '', 8);
+        $content .= $pdfText(105, $y, substr($appointment['name'] ?? '', 0, 18), 8);
+        $content .= $pdfText(210, $y, substr($appointment['doctor_name'] ?? '', 0, 18), 8);
+        $content .= $pdfText(325, $y, $appointment['appointment_date'] ?? '', 8);
+        $content .= $pdfText(390, $y, format_time_display($appointment['appointment_time'] ?? ''), 8);
+        $content .= $pdfText(440, $y, $appointment['appointment_status'] ?? '', 8);
+        $content .= $pdfText(500, $y, $appointment['payment_status'] ?? '', 8);
+        $y -= 14;
+    }
+    $pages[] = $content;
+
+    $objects = [];
+    $objects[] = "<< /Type /Catalog /Pages 2 0 R >>";
+    $pageKids = [];
+    $pageCount = count($pages);
+    $fontObjectNumber = 3 + ($pageCount * 2);
+    foreach ($pages as $index => $pageContent) {
+        $pageObjectNumber = 3 + ($index * 2);
+        $contentObjectNumber = $pageObjectNumber + 1;
+        $pageKids[] = $pageObjectNumber . ' 0 R';
+        $objects[] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 {$fontObjectNumber} 0 R >> >> /Contents {$contentObjectNumber} 0 R >>";
+        $objects[] = "<< /Length " . strlen($pageContent) . " >>\nstream\n{$pageContent}endstream";
+    }
+    array_splice($objects, 1, 0, "<< /Type /Pages /Kids [" . implode(' ', $pageKids) . "] /Count {$pageCount} >>");
+    $objects[] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+
+    $pdf = "%PDF-1.4\n";
+    $offsets = [0];
+    foreach ($objects as $i => $object) {
+        $offsets[] = strlen($pdf);
+        $objectNumber = $i + 1;
+        $pdf .= "{$objectNumber} 0 obj\n{$object}\nendobj\n";
+    }
+    $xrefOffset = strlen($pdf);
+    $pdf .= "xref\n0 " . (count($objects) + 1) . "\n";
+    $pdf .= "0000000000 65535 f \n";
+    for ($i = 1; $i <= count($objects); $i++) {
+        $pdf .= str_pad((string)$offsets[$i], 10, '0', STR_PAD_LEFT) . " 00000 n \n";
+    }
+    $pdf .= "trailer\n<< /Size " . (count($objects) + 1) . " /Root 1 0 R >>\nstartxref\n{$xrefOffset}\n%%EOF";
+
+    $filename = 'quickcare_report_' . date('Ymd_His') . '.pdf';
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+    header('Content-Length: ' . strlen($pdf));
+    echo $pdf;
+    exit;
+}
+
 if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $icon = trim($_POST['icon'] ?? '👨‍⚕️');
     $name = trim($_POST['name'] ?? '');

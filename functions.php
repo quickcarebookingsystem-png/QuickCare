@@ -562,7 +562,7 @@ function render_dashboard($role) {
             $actionData = $role === 'user'
                 ? '" data-pay-url="' . e($payUrl) . '" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '" data-receipt-id="' . e($receiptPaymentId)
                 : '';
-            echo '<tr><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e(format_date_display($a['appointment_date'])) . '</td><td>' . badge($a['appointment_status']) . '</td><td><button type="button" class="btn btn-sm btn-outline dashboard-view-btn" onclick="showAppointmentDetails(this)" data-code="' . e($a['appointment_code']) . '" data-patient="' . e($a['name']) . '" data-doctor="' . e($a['doctor_name']) . '" data-service="' . e($a['service_name']) . '" data-date="' . e(format_date_display($a['appointment_date'])) . '" data-time="' . e(format_time_display($a['appointment_time'])) . '" data-notes="' . e($a['notes'] ?? '') . '" data-status="' . e($a['appointment_status']) . '" data-payment="' . e($a['payment_status']) . '" data-amount="RM ' . e(number_format((float) $a['amount'], 2)) . $actionData . '">View</button></td></tr>';
+            echo '<tr><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e(format_date_display($a['appointment_date'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td><button type="button" class="btn btn-sm btn-outline dashboard-view-btn" onclick="showAppointmentDetails(this)" data-code="' . e($a['appointment_code']) . '" data-patient="' . e($a['name']) . '" data-doctor="' . e($a['doctor_name']) . '" data-service="' . e($a['service_name']) . '" data-date="' . e(format_date_display($a['appointment_date'])) . '" data-time="' . e(format_time_display($a['appointment_time'])) . '" data-notes="' . e($a['notes'] ?? '') . '" data-status="' . e($a['appointment_status']) . '" data-payment="' . e($a['payment_status']) . '" data-amount="RM ' . e(number_format((float) $a['amount'], 2)) . $actionData . '">View</button></td></tr>';
         }
     }
     echo '</tbody></table></div></div></div></div><div><div class="card mb-20">';
@@ -769,6 +769,14 @@ function badge($status) {
     return '<span class="badge badge-' . e($status) . '">' . e($label) . '</span>';
 }
 
+function appointment_badge($status, $role = null) {
+    if (in_array($role, ['staff', 'admin'], true) && in_array($status, ['confirm', 'confirmed'], true)) {
+        return badge('pending');
+    }
+
+    return badge($status);
+}
+
 function render_profile($role) {
     global $conn;
     $u = current_user($conn);
@@ -882,7 +890,6 @@ function render_appointments($role) {
     $appointments = get_appointments($conn, $role, null, null, true);
 
     echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search appointments..." id="searchAppointment"></div><div class="filter-group"><input class="form-control" type="date" id="filterDate" style="width:160px"><select class="filter-select" id="filterStatus"><option value="">All Status</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="pending">Pending</option><option value="paid">Paid</option><option value="rejected">Rejected</option></select></div>';
-    if ($role === 'admin') echo '<a class="btn btn-outline" href="' . e(action_url('export_report')) . '">Export</a>';
     echo '</div><div class="card"><div class="card-body" style="padding:0; overflow-x:auto"><table class="appointments-table" style="width:100%; border-collapse:collapse; min-width:900px"><thead><tr><th>ID</th><th>User</th><th>Doctor</th><th>Service</th><th>Date</th><th>Time</th><th>Status</th><th>Payment</th><th>Actions</th></tr></thead><tbody id="appointmentsTableBody">';
 
     if (empty($appointments)) {
@@ -890,7 +897,7 @@ function render_appointments($role) {
     }
 
     foreach ($appointments as $a) {
-        echo '<tr><td>' . e($a['appointment_code']) . '</td><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e($a['service_name']) . '</td><td data-date="' . e($a['appointment_date']) . '">' . e(format_date_display($a['appointment_date'])) . '</td><td>' . e(format_time_display($a['appointment_time'])) . '</td><td>' . badge($a['appointment_status']) . '</td><td>' . badge($a['payment_status']) . '</td><td class="appt-actions-cell">' . appointment_actions($role, $a) . '</td></tr>';
+        echo '<tr><td>' . e($a['appointment_code']) . '</td><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e($a['service_name']) . '</td><td data-date="' . e($a['appointment_date']) . '">' . e(format_date_display($a['appointment_date'])) . '</td><td>' . e(format_time_display($a['appointment_time'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td>' . badge($a['payment_status']) . '</td><td class="appt-actions-cell">' . appointment_actions($role, $a) . '</td></tr>';
     }
 
     echo '</tbody></table></div></div>';
@@ -1441,10 +1448,77 @@ function render_payment($role) {
 }
 
 function render_reports() {
-    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Appointment Report</span><a class="btn btn-sm btn-outline" href="' . e(action_url('export_report')) . '">⬇ Export</a></div><div class="card-body"><div class="report-summary"><div class="report-item"><div class="val">124</div><div class="lbl">Total</div></div><div class="report-item"><div class="val">98</div><div class="lbl">Completed</div></div><div class="report-item"><div class="val">14</div><div class="lbl">Pending</div></div><div class="report-item"><div class="val">12</div><div class="lbl">Cancelled</div></div></div><tr><tr><th>Month</th><th>Total</th><th>Completed</th><th>Rate</th> </tr>
-    <tr><td>May 2026</td><td>32</td><td>18</td><td>' . badge('approved') . '</td></tr>
-    <tr><td>Apr 2026</td><td>44</td><td>41</td><td>' . badge('approved') . '</td></tr>
-    </table></div></div><div class="card"><div class="card-header"><span class="card-title">Payment Report</span><a class="btn btn-sm btn-outline" href="' . e(action_url('export_report')) . '">⬇ Export</a></div><div class="card-body"><div class="report-summary"><div class="report-item"><div class="val">RM 6,240</div><div class="lbl">Total Revenue</div></div><div class="report-item"><div class="val">98</div><div class="lbl">Paid Invoices</div></div><div class="report-item"><div class="val">RM 260</div><div class="lbl">Pending</div></div></div></div></div></div>';
+    global $conn;
+
+    $summary = fetch_all_assoc(
+        $conn,
+        "SELECT
+            COUNT(*) AS total,
+            SUM(appointment_status = 'completed') AS completed,
+            SUM(appointment_status IN ('confirmed', 'confirm')) AS confirmed,
+            SUM(appointment_status = 'cancelled') AS cancelled
+         FROM appointments"
+    )[0] ?? ['total' => 0, 'completed' => 0, 'confirmed' => 0, 'cancelled' => 0];
+
+    $monthlyRows = fetch_all_assoc(
+        $conn,
+        "SELECT
+            DATE_FORMAT(appointment_date, '%M %Y') AS month_label,
+            COUNT(*) AS total,
+            SUM(appointment_status = 'completed') AS completed
+         FROM appointments
+         GROUP BY YEAR(appointment_date), MONTH(appointment_date)
+         ORDER BY YEAR(appointment_date) DESC, MONTH(appointment_date) DESC"
+    );
+
+    $paymentSummary = fetch_all_assoc(
+        $conn,
+        "SELECT
+            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
+            SUM(payment_status IN ('paid', 'approved')) AS paid_count,
+            COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'verifying') THEN amount ELSE 0 END), 0) AS pending_amount
+         FROM payments"
+    )[0] ?? ['revenue' => 0, 'paid_count' => 0, 'pending_amount' => 0];
+
+    $paymentMonthlyRows = fetch_all_assoc(
+        $conn,
+        "SELECT
+            DATE_FORMAT(payment_date, '%M %Y') AS month_label,
+            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
+            SUM(payment_status IN ('paid', 'approved')) AS invoices
+         FROM payments
+         GROUP BY YEAR(payment_date), MONTH(payment_date)
+         ORDER BY YEAR(payment_date) DESC, MONTH(payment_date) DESC"
+    );
+
+    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Appointment Report</span><a class="btn btn-sm btn-outline" href="' . e(action_url('export_report')) . '">⬇ Export</a></div><div class="card-body"><div class="report-summary">';
+    echo '<div class="report-item"><div class="val">' . e((int)($summary['total'] ?? 0)) . '</div><div class="lbl">Total</div></div>';
+    echo '<div class="report-item"><div class="val">' . e((int)($summary['completed'] ?? 0)) . '</div><div class="lbl">Completed</div></div>';
+    echo '<div class="report-item"><div class="val">' . e((int)($summary['confirmed'] ?? 0)) . '</div><div class="lbl">Pending</div></div>';
+    echo '<div class="report-item"><div class="val">' . e((int)($summary['cancelled'] ?? 0)) . '</div><div class="lbl">Cancelled</div></div></div>';
+    echo '<table><thead><tr><th>Month</th><th>Total</th><th>Completed</th><th>Rate</th></tr></thead><tbody>';
+    if (empty($monthlyRows)) {
+        echo '<tr><td colspan="4" style="text-align:center">No appointment data found.</td></tr>';
+    }
+    foreach ($monthlyRows as $row) {
+        $total = (int)($row['total'] ?? 0);
+        $completed = (int)($row['completed'] ?? 0);
+        $rate = $total > 0 ? round(($completed / $total) * 100) : 0;
+        $rateClass = $rate >= 80 ? 'paid' : ($rate >= 50 ? 'pending' : 'rejected');
+        echo '<tr><td>' . e($row['month_label']) . '</td><td>' . e($total) . '</td><td>' . e($completed) . '</td><td><span class="badge badge-' . e($rateClass) . '">' . e($rate) . '%</span></td></tr>';
+    }
+    echo '</tbody></table></div></div><div class="card"><div class="card-header"><span class="card-title">Payment Report</span><a class="btn btn-sm btn-outline" href="' . e(action_url('export_report')) . '">⬇ Export</a></div><div class="card-body"><div class="report-summary">';
+    echo '<div class="report-item"><div class="val">RM ' . e(number_format((float)($paymentSummary['revenue'] ?? 0), 2)) . '</div><div class="lbl">Total Revenue</div></div>';
+    echo '<div class="report-item"><div class="val">' . e((int)($paymentSummary['paid_count'] ?? 0)) . '</div><div class="lbl">Paid Invoices</div></div>';
+    echo '<div class="report-item"><div class="val">RM ' . e(number_format((float)($paymentSummary['pending_amount'] ?? 0), 2)) . '</div><div class="lbl">Pending</div></div>';
+    echo '</div><table><thead><tr><th>Month</th><th>Revenue</th><th>Invoices</th></tr></thead><tbody>';
+    if (empty($paymentMonthlyRows)) {
+        echo '<tr><td colspan="3" style="text-align:center">No payment data found.</td></tr>';
+    }
+    foreach ($paymentMonthlyRows as $row) {
+        echo '<tr><td>' . e($row['month_label']) . '</td><td>RM ' . e(number_format((float)($row['revenue'] ?? 0), 2)) . '</td><td>' . e((int)($row['invoices'] ?? 0)) . '</td></tr>';
+    }
+    echo '</tbody></table></div></div></div>';
 }
 
 function render_staff() {
@@ -1516,7 +1590,7 @@ function render_schedule() {
         $action = in_array($row['appointment_status'], ['completed', 'cancelled', 'rejected'], true) || !$canComplete
             ? '<span class="text-muted">-</span>'
             : '<a class="btn btn-sm btn-teal" href="' . e(action_url('update_status', ['id' => $row['appointment_code']])) . '">Complete</a>';
-        echo '<tr><td>' . e(format_time_display($row['appointment_time'])) . '</td><td>' . e($row['name']) . '</td><td>' . e($row['doctor_name']) . '</td><td>' . e($row['service_name']) . '</td><td>' . badge($row['appointment_status']) . '</td><td>' . $action . '</td></tr>';
+        echo '<tr><td>' . e(format_time_display($row['appointment_time'])) . '</td><td>' . e($row['name']) . '</td><td>' . e($row['doctor_name']) . '</td><td>' . e($row['service_name']) . '</td><td>' . appointment_badge($row['appointment_status'], 'staff') . '</td><td>' . $action . '</td></tr>';
     }
     echo '</tbody></table></div></div>';
     echo '<script>
