@@ -659,7 +659,33 @@ if ($action === 'export_report') {
         redirect_to(app_url('login.php'));
     }
 
-    $appointments = get_appointments($conn, null, null, null, true);
+    $selectedMonth = (int)($_GET['month'] ?? 0);
+    $selectedYear = (int)($_GET['year'] ?? 0);
+    $appointmentWhere = '';
+    $paymentWhere = '';
+    $filterTypes = '';
+    $appointmentParams = [];
+    $paymentParams = [];
+    $reportPeriod = 'All Time';
+
+    if ($selectedMonth >= 1 && $selectedMonth <= 12 && $selectedYear > 0) {
+        $appointmentWhere = ' WHERE MONTH(appointment_date) = ? AND YEAR(appointment_date) = ?';
+        $paymentWhere = ' WHERE MONTH(payment_date) = ? AND YEAR(payment_date) = ?';
+        $filterTypes = 'ii';
+        $appointmentParams = [$selectedMonth, $selectedYear];
+        $paymentParams = [$selectedMonth, $selectedYear];
+        $reportPeriod = date('F', mktime(0, 0, 0, $selectedMonth, 1)) . ' ' . $selectedYear;
+    }
+
+    $appointments = fetch_all_assoc(
+        $conn,
+        "SELECT appointment_id, appointment_code, name, doctor_name, service_name,
+                appointment_date, appointment_time, appointment_status, payment_status, amount, created_at
+         FROM appointments" . $appointmentWhere . "
+         ORDER BY created_at DESC, appointment_id DESC",
+        $filterTypes,
+        $appointmentParams
+    );
     $appointmentSummary = fetch_all_assoc(
         $conn,
         "SELECT
@@ -667,7 +693,9 @@ if ($action === 'export_report') {
             SUM(appointment_status = 'completed') AS completed,
             SUM(appointment_status IN ('confirmed', 'confirm')) AS pending,
             SUM(appointment_status = 'cancelled') AS cancelled
-         FROM appointments"
+         FROM appointments" . $appointmentWhere,
+        $filterTypes,
+        $appointmentParams
     )[0] ?? ['total' => 0, 'completed' => 0, 'pending' => 0, 'cancelled' => 0];
     $appointmentMonthlyRows = fetch_all_assoc(
         $conn,
@@ -675,9 +703,11 @@ if ($action === 'export_report') {
             DATE_FORMAT(appointment_date, '%M %Y') AS month_label,
             COUNT(*) AS total,
             SUM(appointment_status = 'completed') AS completed
-         FROM appointments
+         FROM appointments" . $appointmentWhere . "
          GROUP BY YEAR(appointment_date), MONTH(appointment_date)
-         ORDER BY YEAR(appointment_date) DESC, MONTH(appointment_date) DESC"
+         ORDER BY YEAR(appointment_date) DESC, MONTH(appointment_date) DESC",
+        $filterTypes,
+        $appointmentParams
     );
     $paymentSummary = fetch_all_assoc(
         $conn,
@@ -685,7 +715,9 @@ if ($action === 'export_report') {
             COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
             SUM(payment_status IN ('paid', 'approved')) AS paid_count,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'verifying') THEN amount ELSE 0 END), 0) AS pending_amount
-         FROM payments"
+         FROM payments" . $paymentWhere,
+        $filterTypes,
+        $paymentParams
     )[0] ?? ['revenue' => 0, 'paid_count' => 0, 'pending_amount' => 0];
     $paymentMonthlyRows = fetch_all_assoc(
         $conn,
@@ -693,9 +725,11 @@ if ($action === 'export_report') {
             DATE_FORMAT(payment_date, '%M %Y') AS month_label,
             COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
             SUM(payment_status IN ('paid', 'approved')) AS invoices
-         FROM payments
+         FROM payments" . $paymentWhere . "
          GROUP BY YEAR(payment_date), MONTH(payment_date)
-         ORDER BY YEAR(payment_date) DESC, MONTH(payment_date) DESC"
+         ORDER BY YEAR(payment_date) DESC, MONTH(payment_date) DESC",
+        $filterTypes,
+        $paymentParams
     );
 
     $escapePdf = function ($text) {
@@ -712,6 +746,8 @@ if ($action === 'export_report') {
     $content .= $pdfText(50, $y, 'QuickCare Report', 18);
     $y -= 24;
     $content .= $pdfText(50, $y, 'Generated: ' . date('d M Y, H:i'), 10);
+    $y -= 16;
+    $content .= $pdfText(50, $y, 'Period: ' . $reportPeriod, 10);
     $y -= 34;
     $content .= $pdfText(50, $y, 'Appointment Report', 14);
     $y -= 22;

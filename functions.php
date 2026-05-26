@@ -1449,6 +1449,17 @@ function render_payment($role) {
 
 function render_reports() {
     global $conn;
+    $yearRows = fetch_all_assoc(
+        $conn,
+        "SELECT DISTINCT YEAR(report_date) AS report_year
+         FROM (
+            SELECT appointment_date AS report_date FROM appointments
+            UNION ALL
+            SELECT payment_date AS report_date FROM payments
+         ) report_dates
+         WHERE report_date IS NOT NULL
+         ORDER BY report_year DESC"
+    );
 
     $summary = fetch_all_assoc(
         $conn,
@@ -1491,7 +1502,21 @@ function render_reports() {
          ORDER BY YEAR(payment_date) DESC, MONTH(payment_date) DESC"
     );
 
-    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Appointment Report</span><a class="btn btn-sm btn-outline" href="' . e(action_url('export_report')) . '">⬇ Export</a></div><div class="card-body"><div class="report-summary">';
+    echo '<div class="toolbar"><div class="filter-group"><select class="filter-select" id="reportMonth">';
+    for ($month = 1; $month <= 12; $month++) {
+        echo '<option value="' . e($month) . '"' . ($month === (int)date('n') ? ' selected' : '') . '>' . e(date('F', mktime(0, 0, 0, $month, 1))) . '</option>';
+    }
+    echo '</select><select class="filter-select" id="reportYear">';
+    if (empty($yearRows)) {
+        echo '<option value="' . e(date('Y')) . '">' . e(date('Y')) . '</option>';
+    }
+    foreach ($yearRows as $row) {
+        $year = (int)($row['report_year'] ?? date('Y'));
+        echo '<option value="' . e($year) . '"' . ($year === (int)date('Y') ? ' selected' : '') . '>' . e($year) . '</option>';
+    }
+    echo '</select></div></div>';
+
+    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Appointment Report</span><a class="btn btn-sm btn-outline report-export-link" href="' . e(action_url('export_report')) . '">⬇ Export</a></div><div class="card-body"><div class="report-summary">';
     echo '<div class="report-item"><div class="val">' . e((int)($summary['total'] ?? 0)) . '</div><div class="lbl">Total</div></div>';
     echo '<div class="report-item"><div class="val">' . e((int)($summary['completed'] ?? 0)) . '</div><div class="lbl">Completed</div></div>';
     echo '<div class="report-item"><div class="val">' . e((int)($summary['confirmed'] ?? 0)) . '</div><div class="lbl">Pending</div></div>';
@@ -1507,7 +1532,7 @@ function render_reports() {
         $rateClass = $rate >= 80 ? 'paid' : ($rate >= 50 ? 'pending' : 'rejected');
         echo '<tr><td>' . e($row['month_label']) . '</td><td>' . e($total) . '</td><td>' . e($completed) . '</td><td><span class="badge badge-' . e($rateClass) . '">' . e($rate) . '%</span></td></tr>';
     }
-    echo '</tbody></table></div></div><div class="card"><div class="card-header"><span class="card-title">Payment Report</span><a class="btn btn-sm btn-outline" href="' . e(action_url('export_report')) . '">⬇ Export</a></div><div class="card-body"><div class="report-summary">';
+    echo '</tbody></table></div></div><div class="card"><div class="card-header"><span class="card-title">Payment Report</span><a class="btn btn-sm btn-outline report-export-link" href="' . e(action_url('export_report')) . '">⬇ Export</a></div><div class="card-body"><div class="report-summary">';
     echo '<div class="report-item"><div class="val">RM ' . e(number_format((float)($paymentSummary['revenue'] ?? 0), 2)) . '</div><div class="lbl">Total Revenue</div></div>';
     echo '<div class="report-item"><div class="val">' . e((int)($paymentSummary['paid_count'] ?? 0)) . '</div><div class="lbl">Paid Invoices</div></div>';
     echo '<div class="report-item"><div class="val">RM ' . e(number_format((float)($paymentSummary['pending_amount'] ?? 0), 2)) . '</div><div class="lbl">Pending</div></div>';
@@ -1519,6 +1544,26 @@ function render_reports() {
         echo '<tr><td>' . e($row['month_label']) . '</td><td>RM ' . e(number_format((float)($row['revenue'] ?? 0), 2)) . '</td><td>' . e((int)($row['invoices'] ?? 0)) . '</td></tr>';
     }
     echo '</tbody></table></div></div></div>';
+    echo '<script>
+    (function () {
+        const monthSelect = document.getElementById("reportMonth");
+        const yearSelect = document.getElementById("reportYear");
+        const exportLinks = document.querySelectorAll(".report-export-link");
+        const baseUrl = ' . json_encode(action_url('export_report')) . ';
+        function updateReportExportLinks() {
+            const params = new URLSearchParams();
+            params.set("action", "export_report");
+            params.set("month", monthSelect?.value || "");
+            params.set("year", yearSelect?.value || "");
+            exportLinks.forEach(link => {
+                link.href = baseUrl.split("?")[0] + "?" + params.toString();
+            });
+        }
+        monthSelect?.addEventListener("change", updateReportExportLinks);
+        yearSelect?.addEventListener("change", updateReportExportLinks);
+        updateReportExportLinks();
+    })();
+    </script>';
 }
 
 function render_staff() {
