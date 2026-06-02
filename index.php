@@ -20,15 +20,15 @@ app_header('QuickCare - Clinic Booking System');
       <div class="landing-dropdown">
         <a class="landing-link" href="#services" draggable="false">Services <span class="dropdown-arrow">▾</span></a>
         <div class="landing-dropdown-content">
-          <a href="#services" draggable="false">General Check-up</a>
-          <a href="#services" draggable="false">Dental Care</a>
-          <a href="#services" draggable="false">Eye Examination</a>
-          <a href="#services" draggable="false">Vaccination</a>
-          <a href="#services" draggable="false">Blood Test</a>
-          <a href="#services" draggable="false">Cardiology</a>
+          <a href="javascript:void(0)" onclick="openServiceDetailByName('General Check-up')" draggable="false">General Check-up</a>
+          <a href="javascript:void(0)" onclick="openServiceDetailByName('Dental Care')" draggable="false">Dental Care</a>
+          <a href="javascript:void(0)" onclick="openServiceDetailByName('Eye Examination')" draggable="false">Eye Examination</a>
+          <a href="javascript:void(0)" onclick="openServiceDetailByName('Vaccination')" draggable="false">Vaccination</a>
+          <a href="javascript:void(0)" onclick="openServiceDetailByName('Blood Test')" draggable="false">Blood Test</a>
+          <a href="javascript:void(0)" onclick="openServiceDetailByName('Cardiology')" draggable="false">Cardiology</a>
         </div>
       </div>
-      <a class="landing-link" href="#contact" draggable="false">Contact</a>
+      <a class="landing-link" href="contact.php" draggable="false">Contact</a>
       <a class="btn btn-outline landing-nav-btn" href="login.php" draggable="false">Login</a>
       <a class="btn btn-primary landing-nav-btn" href="register.php" draggable="false">Register</a>
     </nav>
@@ -121,7 +121,7 @@ app_header('QuickCare - Clinic Booking System');
         <a href="index.php" draggable="false">Home</a>
         <a href="#about" draggable="false">About Us</a>
         <a href="#services" draggable="false">Services</a>
-        <a href="#contact" draggable="false">Contact</a>
+        <a href="contact.php" draggable="false">Contact</a>
       </div>
       <div class="footer-nav-col">
         <h3>Our Services</h3>
@@ -140,5 +140,21 @@ app_header('QuickCare - Clinic Booking System');
 
   <a href="#" class="back-to-top" title="Back to top">↑</a>
 </div>
+
+<script>
+function openServiceDetailByName(serviceName) {
+    // Find the corresponding service card in the grid rendered by render_services()
+    const cards = document.querySelectorAll('.service-card');
+    for (const card of cards) {
+        if (card.dataset.name && card.dataset.name.trim() === serviceName) {
+            // Trigger the existing showServiceDetails function defined in render_services()
+            if (typeof showServiceDetails === 'function') {
+                showServiceDetails(card);
+            }
+            return;
+        }
+    }
+}
+</script>
 </body>
 </html>

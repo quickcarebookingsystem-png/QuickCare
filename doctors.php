@@ -29,7 +29,7 @@ $doctors = get_doctors($conn);
           <a href="index.php#services" draggable="false">Cardiology</a>
         </div>
       </div>
-      <a class="landing-link" href="index.php#contact" draggable="false">Contact</a>
+      <a class="landing-link" href="contact.php" draggable="false">Contact</a>
       <a class="btn btn-outline landing-nav-btn" href="login.php" draggable="false">Login</a>
       <a class="btn btn-primary landing-nav-btn" href="register.php" draggable="false">Register</a>
     </nav>
@@ -71,7 +71,7 @@ $doctors = get_doctors($conn);
         <a href="index.php" draggable="false">Home</a>
         <a href="doctors.php" draggable="false">About Us</a>
         <a href="index.php#services" draggable="false">Services</a>
-        <a href="index.php#contact" draggable="false">Contact</a>
+        <a href="contact.php" draggable="false">Contact</a>
       </div>
       <div class="footer-nav-col">
         <h3>Our Services</h3>
