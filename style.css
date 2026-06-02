@@ -540,6 +540,8 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .badge-unpaid { background: rgba(176,48,48,0.12); color: var(--danger); }
 .badge-completed { background: rgba(42,95,143,0.12); color: var(--info); }
 .badge-paid { background: rgba(42,127,90,0.12); color: var(--success); }
+.badge-refund-requested { background: rgba(194,122,26,0.12); color: var(--warning); }
+.badge-refunded { background: rgba(194,122,26,0.12); color: var(--warning); }
 .badge-cancelled { background: rgba(176,48,48,0.12); color: var(--danger); }
 .badge-active { background: rgba(42,127,90,0.12); color: var(--success); }
 .badge-inactive { background: rgba(107,114,128,0.12); color: var(--text-muted); }
@@ -1347,6 +1349,19 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .toast.show { transform: translateY(0); opacity: 1; }
 .toast.success { background: var(--success); }
 .toast.error { background: var(--danger); }
+.toast.booking-notice {
+  position: static;
+  display: none;
+  max-width: 480px;
+  margin-bottom: 16px;
+  transform: none;
+  opacity: 1;
+}
+.toast.booking-notice.show {
+  display: block;
+  transform: none;
+  opacity: 1;
+}
 
 /* Report */
 .report-summary {

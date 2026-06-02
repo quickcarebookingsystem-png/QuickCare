@@ -269,6 +269,7 @@ if ($action === 'get_payment_details') {
             <div class="detail-row"><strong>Patient:</strong> ' . htmlspecialchars($payment['user_name']) . '</div>
             <div class="detail-row"><strong>Email:</strong> ' . htmlspecialchars($payment['user_email']) . '</div>
             <div class="detail-row"><strong>Amount:</strong> RM ' . number_format($payment['amount'], 2) . '</div>
+            <div class="detail-row"><strong>Status:</strong> ' . htmlspecialchars(ucfirst($payment['payment_status'])) . '</div>
             <div class="detail-row"><strong>Transaction ID:</strong> ' . htmlspecialchars($payment['transaction_id']) . '</div>
             <div class="detail-row"><strong>Appointment Code:</strong> ' . htmlspecialchars($payment['appointment_code']) . '</div>
             <div class="detail-row"><strong>Remarks:</strong> ' . nl2br(htmlspecialchars($payment['remarks'])) . '</div>
@@ -496,6 +497,14 @@ if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $dateObj = DateTime::createFromFormat('Y-m-d', $date);
     if ($doctor === '' || !$dateObj || $time === '') {
         $_SESSION['QuickCare_message'] = "Please choose a doctor, date and time.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    }
+
+    $today = new DateTime('today');
+    if ($dateObj < $today) {
+        $_SESSION['QuickCare_message'] = "Please choose today or a future appointment date.";
+        $_SESSION['QuickCare_message_type'] = "error";
         redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
     }
 
@@ -862,6 +871,84 @@ if ($action === 'export_report') {
     exit;
 }
 
+// Handle refund request (user only) - AJAX request
+if ($action === 'request_refund') {
+    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'user') {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit;
+    }
+
+    $payment_id = $_POST['payment_id'] ?? 0;
+    $reason = $_POST['reason'] ?? 'No reason provided';
+    $user_id = $_SESSION['id'];
+
+    if (empty($payment_id)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid payment ID']);
+        exit;
+    }
+
+    $result = request_refund($user_id, $payment_id, $reason);
+
+    if ($result) {
+        echo json_encode(['success' => true, 'message' => 'Refund request submitted']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to request refund']);
+    }
+    exit;
+}
+
+// Handle refund payment (admin only) - AJAX request
+if ($action === 'refund_payment') {
+    if (!isset($_SESSION['id']) || $_SESSION['QuickCare_role'] !== 'admin') {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit;
+    }
+
+    $payment_id = $_POST['payment_id'] ?? 0;
+    $reason = $_POST['reason'] ?? 'No reason provided';
+    $admin_id = $_SESSION['id'];
+
+    if (empty($payment_id)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid payment ID']);
+        exit;
+    }
+
+    $result = refund_payment($payment_id, $admin_id, $reason);
+
+    if ($result) {
+        echo json_encode(['success' => true, 'message' => 'Payment refunded']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to refund payment']);
+    }
+    exit;
+}
+
+// Handle reject refund request (admin only) - AJAX request
+if ($action === 'reject_refund') {
+    if (!isset($_SESSION['id']) || $_SESSION['QuickCare_role'] !== 'admin') {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit;
+    }
+
+    $payment_id = $_POST['payment_id'] ?? 0;
+    $reason = $_POST['reason'] ?? 'No reason provided';
+    $admin_id = $_SESSION['id'];
+
+    if (empty($payment_id)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid payment ID']);
+        exit;
+    }
+
+    $result = reject_refund_request($payment_id, $admin_id, $reason);
+
+    if ($result) {
+        echo json_encode(['success' => true, 'message' => 'Refund request rejected']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to reject refund request']);
+    }
+    exit;
+}
+
 if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $icon = trim($_POST['icon'] ?? '👨‍⚕️');
     $name = trim($_POST['name'] ?? '');
@@ -908,6 +995,9 @@ $message = match ($action) {
     'submit_payment' => 'Payment submitted successfully. Please wait for admin approval.',
     'approve_payment' => 'Payment has been approved. Email sent to patient.',
     'reject_payment' => 'Payment has been rejected. Email sent to patient.',
+    'request_refund' => 'Refund request submitted. Please wait for admin approval.',
+    'refund_payment' => 'Payment has been refunded. Email sent to patient.',
+    'reject_refund' => 'Refund request has been rejected. Email sent to patient.',
     default => 'Action completed.',
 };
 
@@ -917,6 +1007,9 @@ if ($action !== 'logout' &&
     $action !== 'submit_payment' && 
     $action !== 'approve_payment' && 
     $action !== 'reject_payment' && 
+    $action !== 'request_refund' && 
+    $action !== 'refund_payment' && 
+    $action !== 'reject_refund' && 
     $action !== 'get_payment_details' && 
     $action !== 'get_receipt' && 
     $action !== 'get_pending_payments_count') {

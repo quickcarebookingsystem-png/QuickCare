@@ -44,6 +44,13 @@ $all_payments = get_all_payments();
                 <span class="stat-label">Total Revenue</span>
             </div>
         </div>
+        <div class="stat-box">
+            <div class="stat-icon">↩️</div>
+            <div class="stat-info">
+                <span class="stat-value"><?php echo count(array_filter($all_payments, function($p) { return $p['payment_status'] == 'refunded'; })); ?></span>
+                <span class="stat-label">Refunded</span>
+            </div>
+        </div>
     </div>
 
     <!-- Filter Tabs -->
@@ -52,6 +59,8 @@ $all_payments = get_all_payments();
         <button class="tab-btn" data-filter="verifying">Verifying ⏳</button>
         <button class="tab-btn" data-filter="approved">Approved ✅</button>
         <button class="tab-btn" data-filter="rejected">Rejected ❌</button>
+        <button class="tab-btn" data-filter="refund_requested">Refund Requests</button>
+        <button class="tab-btn" data-filter="refunded">Refunded</button>
     </div>
 
     <!-- Payments Table -->
@@ -66,6 +75,7 @@ $all_payments = get_all_payments();
                         <th>Appointment</th>
                         <th>Amount</th>
                         <th>Transaction ID</th>
+                        <th>Status</th>
                         <th>Receipt</th>
                         <th>Actions</th>
                     </tr>
@@ -79,7 +89,10 @@ $all_payments = get_all_payments();
                             $paymentGroup = 'verifying';
                         } elseif (in_array($paymentStatus, ['paid', 'approved'], true)) {
                             $paymentGroup = 'approved';
+                        } elseif ($paymentStatus === 'refund_requested') {
+                            $paymentGroup = 'refund_requested';
                         }
+                        $badgeStatus = $paymentStatus === 'approved' ? 'paid' : str_replace('_', '-', $paymentStatus);
                     ?>
                     <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>" data-id="<?php echo $payment['payment_id']; ?>">
                         <td><?php echo date('d M Y, h:i A', strtotime($payment['payment_date'])); ?></td>
@@ -88,6 +101,7 @@ $all_payments = get_all_payments();
                         <td><?php echo htmlspecialchars($payment['appointment_code']); ?></td>
                         <td>RM <?php echo number_format($payment['amount'], 2); ?></td>
                         <td><?php echo htmlspecialchars($payment['transaction_id']); ?></td>
+                        <td><?php echo badge($badgeStatus); ?></td>
                         <td>
                             <button class="btn-view" onclick="viewReceipt('<?php echo $payment['receipt_image']; ?>')">
                                 View
@@ -100,6 +114,13 @@ $all_payments = get_all_payments();
                                 </button>
                                 <button class="btn-reject" onclick="showRejectModal(<?php echo $payment['payment_id']; ?>)">
                                     Reject
+                                </button>
+                            <?php elseif ($payment['payment_status'] === 'refund_requested'): ?>
+                                <button class="btn-refund" onclick="showRefundModal(<?php echo $payment['payment_id']; ?>)">
+                                    Approve Refund
+                                </button>
+                                <button class="btn-reject" onclick="showRejectRefundModal(<?php echo $payment['payment_id']; ?>)">
+                                    Reject Refund
                                 </button>
                             <?php else: ?>
                                 <span class="text-muted">-</span>
@@ -141,6 +162,44 @@ $all_payments = get_all_payments();
         <div class="modal-footer">
             <button class="btn btn-outline" onclick="closeRejectModal()">Cancel</button>
             <button class="btn btn-danger" onclick="confirmReject()">Confirm Reject</button>
+        </div>
+    </div>
+</div>
+
+<!-- Refund Modal -->
+<div id="refundModal" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 400px;">
+        <div class="modal-header">
+            <span class="modal-title">Approve Refund</span>
+            <button class="modal-close" onclick="closeRefundModal()">X</button>
+        </div>
+        <div class="modal-body">
+            <p>Please provide a note for approving this refund:</p>
+            <textarea id="refundReason" class="form-control" rows="3" placeholder="e.g., Appointment cancelled, duplicate payment, etc."></textarea>
+            <input type="hidden" id="refundPaymentId">
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeRefundModal()">Cancel</button>
+            <button class="btn btn-refund-confirm" onclick="confirmRefund()">Approve Refund</button>
+        </div>
+    </div>
+</div>
+
+<!-- Reject Refund Modal -->
+<div id="rejectRefundModal" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 400px;">
+        <div class="modal-header">
+            <span class="modal-title">Reject Refund Request</span>
+            <button class="modal-close" onclick="closeRejectRefundModal()">X</button>
+        </div>
+        <div class="modal-body">
+            <p>Please provide a reason for rejecting this refund request:</p>
+            <textarea id="rejectRefundReason" class="form-control" rows="3" placeholder="e.g., Refund conditions not met"></textarea>
+            <input type="hidden" id="rejectRefundPaymentId">
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeRejectRefundModal()">Cancel</button>
+            <button class="btn btn-danger" onclick="confirmRejectRefund()">Reject Refund</button>
         </div>
     </div>
 </div>
@@ -301,6 +360,33 @@ $all_payments = get_all_payments();
 
 .btn-reject:hover {
     background: #8a2020;
+}
+
+.btn-refund {
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    border: none;
+    background: var(--warning);
+    color: white;
+}
+
+.btn-refund:hover {
+    background: #a16207;
+}
+
+.btn-refund-confirm {
+    background: var(--warning);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.btn-refund-confirm:hover {
+    background: #a16207;
 }
 
 .btn-outline {
@@ -510,6 +596,82 @@ function confirmReject() {
     .then(data => {
         if (data.success) {
             alert('Payment rejected. Email sent to patient.');
+            location.reload();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    });
+}
+
+let refundPaymentId = null;
+
+function showRefundModal(paymentId) {
+    refundPaymentId = paymentId;
+    document.getElementById('refundReason').value = '';
+    document.getElementById('refundModal').style.display = 'flex';
+}
+
+function closeRefundModal() {
+    document.getElementById('refundModal').style.display = 'none';
+    refundPaymentId = null;
+}
+
+function confirmRefund() {
+    const reason = document.getElementById('refundReason').value;
+    if (!reason.trim()) {
+        alert('Please provide a note for refund approval');
+        return;
+    }
+
+    if (!confirm('Approve this refund request? The user will receive an email notification.')) {
+        return;
+    }
+    
+    fetch('../action.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `action=refund_payment&payment_id=${refundPaymentId}&reason=${encodeURIComponent(reason)}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Refund approved. Email sent to patient.');
+            location.reload();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    });
+}
+
+let rejectRefundPaymentId = null;
+
+function showRejectRefundModal(paymentId) {
+    rejectRefundPaymentId = paymentId;
+    document.getElementById('rejectRefundReason').value = '';
+    document.getElementById('rejectRefundModal').style.display = 'flex';
+}
+
+function closeRejectRefundModal() {
+    document.getElementById('rejectRefundModal').style.display = 'none';
+    rejectRefundPaymentId = null;
+}
+
+function confirmRejectRefund() {
+    const reason = document.getElementById('rejectRefundReason').value;
+    if (!reason.trim()) {
+        alert('Please provide a reason for rejecting the refund');
+        return;
+    }
+
+    fetch('../action.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `action=reject_refund&payment_id=${rejectRefundPaymentId}&reason=${encodeURIComponent(reason)}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Refund request rejected. Email sent to patient.');
             location.reload();
         } else {
             alert('Error: ' + data.message);

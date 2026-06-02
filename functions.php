@@ -764,6 +764,9 @@ function badge($status) {
         'unpaid' => 'Unpaid',
         'paid' => 'Paid',
         'verifying' => 'Verifying',
+        'refunded' => 'Refunded',
+        'refund_requested' => 'Refund Requested',
+        'refund-requested' => 'Refund Requested',
     ];
     $label = $labels[$status] ?? ucfirst($status);
     return '<span class="badge badge-' . e($status) . '">' . e($label) . '</span>';
@@ -1032,6 +1035,9 @@ function appointment_actions($role, $a) {
         $menuItems = [];
 
         if (in_array($appointmentStatus, ['completed', 'cancelled'], true)) {
+            if ($appointmentStatus === 'cancelled' && in_array($paymentStatus, ['paid', 'approved'], true) && $receiptPaymentId > 0) {
+                $menuItems[] = '<button type="button" class="appt-menu-item" onclick="requestAppointmentRefund(' . e($receiptPaymentId) . ')">Request Refund</button>';
+            }
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
         } elseif (in_array($appointmentStatus, ['confirm', 'confirmed'], true) && $paymentStatus === 'pending') {
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
@@ -1200,6 +1206,32 @@ function render_appointments($role) {
             alert("Error loading receipt");
         }
     }
+    async function requestAppointmentRefund(paymentId) {
+        if (!paymentId) {
+            alert("Payment record not found.");
+            return;
+        }
+        const reason = prompt("Please enter a reason for your refund request:");
+        if (reason === null) {
+            return;
+        }
+        if (!reason.trim()) {
+            alert("Please provide a reason for refund request.");
+            return;
+        }
+        const response = await fetch("' . e(app_url('action.php')) . '", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "action=request_refund&payment_id=" + encodeURIComponent(paymentId) + "&reason=" + encodeURIComponent(reason)
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert("Refund request submitted. Please wait for admin approval.");
+            window.location.reload();
+        } else {
+            alert("Error: " + data.message);
+        }
+    }
     function closeAppointmentMenus() {
         document.querySelectorAll(".appt-action-menu.open").forEach(menu => menu.classList.remove("open"));
     }
@@ -1323,6 +1355,7 @@ function render_book() {
     echo '<input type="hidden" name="service" id="selectedServiceInput" value="">';
     echo '<input type="hidden" name="doctor" id="selectedDoctorInput" value="">';
     echo '<input type="hidden" name="time" id="selectedTimeInput" value="">';
+    echo '<div class="toast booking-notice" id="bookingNotice" aria-live="polite"></div>';
 
     echo '<div class="booking-steps">';
     echo '<div class="booking-step active" data-step="1"><span class="step-num">1</span><span class="step-label">Select Service</span></div>';
@@ -1404,9 +1437,12 @@ function render_book() {
 
         var doctorSchedules = ' . ($doctorSchedulesJson ?: '{}') . ';
         var bookedSlots = ' . ($bookedSlotsJson ?: '{}') . ';
+        var minDate = ' . json_encode($today) . ';
         var steps = wizard.querySelectorAll(".booking-step");
         var panels = wizard.querySelectorAll(".booking-panel");
         var timeGrid = document.getElementById("bookTimeGrid");
+        var bookingNotice = document.getElementById("bookingNotice");
+        var bookingNoticeTimer = null;
         var state = {
             services: [],
             servicePriceTotal: 0,
@@ -1422,6 +1458,18 @@ function render_book() {
         var dateInput = document.getElementById("bookingDateInput");
         if (dateInput) {
             state.date = dateInput.value || "";
+        }
+
+        function showBookingNotice(message, type) {
+            if (!bookingNotice) return;
+            bookingNotice.textContent = message;
+            bookingNotice.className = "toast booking-notice show " + (type || "success");
+            if (bookingNoticeTimer) {
+                clearTimeout(bookingNoticeTimer);
+            }
+            bookingNoticeTimer = setTimeout(function () {
+                bookingNotice.classList.remove("show");
+            }, 4200);
         }
 
         function formatDate(value) {
@@ -1556,6 +1604,10 @@ function render_book() {
                     alert("Please select a date first.");
                     return false;
                 }
+                if (minDate && state.date < minDate) {
+                    showBookingNotice("Please choose today or a future appointment date.", "error");
+                    return false;
+                }
                 if (!state.time) {
                     alert("Please select a time slot first.");
                     return false;
@@ -1611,6 +1663,11 @@ function render_book() {
             if (state.services.length === 0 || !state.doctor || !state.date || !state.time) {
                 event.preventDefault();
                 alert("Please complete all booking steps before confirming.");
+                return;
+            }
+            if (minDate && state.date < minDate) {
+                event.preventDefault();
+                showBookingNotice("Please choose today or a future appointment date.", "error");
             }
         });
 
@@ -2030,6 +2087,7 @@ function get_user_payment_history($user_id) {
               a.appointment_code, 
               a.appointment_date, 
               a.appointment_time,
+              a.appointment_status,
               a.doctor_name, 
               a.service_name
               FROM payments p
@@ -2251,6 +2309,166 @@ function reject_payment($payment_id, $admin_id, $reason) {
     return $success;
 }
 
+// Refund payment (admin)
+function refund_payment($payment_id, $admin_id, $reason) {
+    global $conn;
+
+    $conn->begin_transaction();
+
+    try {
+        $stmt = $conn->prepare("SELECT * FROM payments WHERE payment_id = ?");
+        $stmt->bind_param("i", $payment_id);
+        $stmt->execute();
+        $payment = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$payment) {
+            throw new Exception('Payment not found');
+        }
+
+        if ($payment['payment_status'] !== 'refund_requested') {
+            throw new Exception('Only refund requests can be approved');
+        }
+
+        $refundNote = trim($reason) !== '' ? trim($reason) : 'No reason provided';
+        $stmt = $conn->prepare("
+            UPDATE payments
+            SET payment_status = 'refunded',
+                approved_by = ?,
+                approved_date = NOW(),
+                remarks = CONCAT(COALESCE(remarks, ''), '\nRefunded: ', ?)
+            WHERE payment_id = ?
+        ");
+        $stmt->bind_param("isi", $admin_id, $refundNote, $payment_id);
+        $stmt->execute();
+        $stmt->close();
+
+        if ($payment['appointment_code']) {
+            $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'refunded' WHERE appointment_code = ?");
+            $stmt->bind_param("s", $payment['appointment_code']);
+            $stmt->execute();
+            $stmt->close();
+        }
+
+        $conn->commit();
+
+        $payment['payment_status'] = 'refunded';
+        send_payment_refunded_email($payment['user_id'], $payment, $refundNote);
+
+        return true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        return false;
+    }
+}
+
+// Reject refund request (admin)
+function reject_refund_request($payment_id, $admin_id, $reason) {
+    global $conn;
+
+    $conn->begin_transaction();
+
+    try {
+        $stmt = $conn->prepare("SELECT * FROM payments WHERE payment_id = ?");
+        $stmt->bind_param("i", $payment_id);
+        $stmt->execute();
+        $payment = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$payment) {
+            throw new Exception('Payment not found');
+        }
+
+        if ($payment['payment_status'] !== 'refund_requested') {
+            throw new Exception('Only refund requests can be rejected');
+        }
+
+        $rejectNote = trim($reason) !== '' ? trim($reason) : 'No reason provided';
+        $stmt = $conn->prepare("
+            UPDATE payments
+            SET payment_status = 'paid',
+                approved_by = ?,
+                approved_date = NOW(),
+                remarks = CONCAT(COALESCE(remarks, ''), '\nRefund request rejected: ', ?)
+            WHERE payment_id = ?
+        ");
+        $stmt->bind_param("isi", $admin_id, $rejectNote, $payment_id);
+        $stmt->execute();
+        $stmt->close();
+
+        if ($payment['appointment_code']) {
+            $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'paid' WHERE appointment_code = ?");
+            $stmt->bind_param("s", $payment['appointment_code']);
+            $stmt->execute();
+            $stmt->close();
+        }
+
+        $conn->commit();
+        send_refund_rejected_email($payment['user_id'], $payment, $rejectNote);
+
+        return true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        return false;
+    }
+}
+
+// Request refund (user)
+function request_refund($user_id, $payment_id, $reason) {
+    global $conn;
+
+    $conn->begin_transaction();
+
+    try {
+        $stmt = $conn->prepare("
+            SELECT p.*, a.appointment_status
+            FROM payments p
+            LEFT JOIN appointments a ON a.appointment_code = p.appointment_code
+            WHERE p.payment_id = ? AND p.user_id = ?
+        ");
+        $stmt->bind_param("ii", $payment_id, $user_id);
+        $stmt->execute();
+        $payment = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$payment) {
+            throw new Exception('Payment not found');
+        }
+
+        if (($payment['appointment_status'] ?? '') !== 'cancelled') {
+            throw new Exception('Appointment must be cancelled before requesting a refund');
+        }
+
+        if (!in_array($payment['payment_status'], ['paid', 'approved'], true)) {
+            throw new Exception('Only paid payments can request a refund');
+        }
+
+        $refundNote = trim($reason) !== '' ? trim($reason) : 'No reason provided';
+        $stmt = $conn->prepare("
+            UPDATE payments
+            SET payment_status = 'refund_requested',
+                remarks = CONCAT(COALESCE(remarks, ''), '\nRefund requested: ', ?)
+            WHERE payment_id = ? AND user_id = ?
+        ");
+        $stmt->bind_param("sii", $refundNote, $payment_id, $user_id);
+        $stmt->execute();
+        $stmt->close();
+
+        if ($payment['appointment_code']) {
+            $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'refund_requested' WHERE appointment_code = ?");
+            $stmt->bind_param("s", $payment['appointment_code']);
+            $stmt->execute();
+            $stmt->close();
+        }
+
+        $conn->commit();
+        return true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        return false;
+    }
+}
+
 // Send email for approved payment
 function send_payment_approved_email($user_id, $payment) {
     global $conn;
@@ -2310,6 +2528,68 @@ function send_payment_rejected_email($user_id, $payment, $reason) {
         <p><a href='" . absolute_app_url('user/payment.php') . "'>Click here to retry payment</a></p>
     ";
     
+    send_email($user['email'], $subject, $body);
+}
+
+// Send email for refunded payment
+function send_payment_refunded_email($user_id, $payment, $reason) {
+    global $conn;
+
+    $stmt = $conn->prepare("SELECT * FROM users WHERE user_id = ?");
+    $stmt->bind_param("i", $user_id);
+    $stmt->execute();
+    $user = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$user) return;
+
+    $subject = "Payment Refunded - QuickCare";
+    $body = "
+        <h2>Payment Refunded</h2>
+        <p>Dear {$user['name']},</p>
+        <p>Your payment has been <strong>REFUNDED</strong>.</p>
+        <p><strong>Reason:</strong> {$reason}</p>
+        <h3>Payment Details:</h3>
+        <ul>
+            <li><strong>Receipt Number:</strong> {$payment['receipt_number']}</li>
+            <li><strong>Amount:</strong> RM " . number_format($payment['amount'], 2) . "</li>
+            <li><strong>Appointment Code:</strong> {$payment['appointment_code']}</li>
+        </ul>
+        <p>Please contact QuickCare if you have any questions about this refund.</p>
+        <br>
+        <p>Thank you for using QuickCare.</p>
+    ";
+
+    send_email($user['email'], $subject, $body);
+}
+
+// Send email for rejected refund request
+function send_refund_rejected_email($user_id, $payment, $reason) {
+    global $conn;
+
+    $stmt = $conn->prepare("SELECT * FROM users WHERE user_id = ?");
+    $stmt->bind_param("i", $user_id);
+    $stmt->execute();
+    $user = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$user) return;
+
+    $subject = "Refund Request Rejected - QuickCare";
+    $body = "
+        <h2>Refund Request Rejected</h2>
+        <p>Dear {$user['name']},</p>
+        <p>Your refund request has been <strong>REJECTED</strong>.</p>
+        <p><strong>Reason:</strong> {$reason}</p>
+        <h3>Payment Details:</h3>
+        <ul>
+            <li><strong>Receipt Number:</strong> {$payment['receipt_number']}</li>
+            <li><strong>Amount:</strong> RM " . number_format($payment['amount'], 2) . "</li>
+            <li><strong>Appointment Code:</strong> {$payment['appointment_code']}</li>
+        </ul>
+        <p>Please contact QuickCare if you have any questions.</p>
+    ";
+
     send_email($user['email'], $subject, $body);
 }
 
