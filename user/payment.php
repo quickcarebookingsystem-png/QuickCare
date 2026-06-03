@@ -49,19 +49,42 @@ $selected_appointment = $_GET['appointment'] ?? '';
             <div class="step-content">
                 <h3>Scan QR Code to Pay</h3>
                 <div class="qr-container">
-                    <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=QUICKCARE-PAYMENT" 
-                             alt="QR Code" id="qrImage">
+                    <div class="qr-stack">
+                        <div class="qr-code">
+                            <div class="qr-title">Bank QR</div>
+                            <img src="<?php echo e(app_url('uploads/receipts/bank_qr.JPG')); ?>"
+                                 alt="Bank payment QR Code" id="bankQrImage">
+                            <div class="qr-caption">RHB Bank</div>
+                        </div>
+                        <div class="qr-code">
+                            <div class="qr-title">TNG QR</div>
+                            <img src="<?php echo e(app_url('uploads/receipts/tng_qr.JPG')); ?>"
+                                 alt="Touch n Go payment QR Code" id="tngQrImage">
+                            <div class="qr-caption">Touch 'n Go eWallet</div>
+                        </div>
                     </div>
                     <div class="payment-details">
                         <div class="amount-display">
                             Amount: <strong id="payAmount">RM 0.00</strong>
                         </div>
                         <div class="bank-details">
-                            <p><strong>📱 DuitNow ID:</strong> 1234567890</p>
-                            <p><strong>📱 Touch 'n Go:</strong> 012-3456789</p>
-                            <p><strong>🏦 Bank Transfer:</strong> Maybank 1234-5678-9012</p>
-                            <p><strong>🏦 Account Name:</strong> QuickCare Clinic Sdn Bhd</p>
+                            <div class="bank-details-title">Payment Details</div>
+                            <div class="bank-detail-row">
+                                <span class="bank-detail-label">DuitNow ID</span>
+                                <span class="bank-detail-value">150598893567</span>
+                            </div>
+                            <div class="bank-detail-row">
+                                <span class="bank-detail-label">Touch 'n Go</span>
+                                <span class="bank-detail-value">011-10807180</span>
+                            </div>
+                            <div class="bank-detail-row">
+                                <span class="bank-detail-label">Bank Transfer</span>
+                                <span class="bank-detail-value">RHB Bank<br>1-51414-0007092-2</span>
+                            </div>
+                            <div class="bank-detail-row">
+                                <span class="bank-detail-label">Account Name</span>
+                                <span class="bank-detail-value">NG SHUZHENG<br><small>Admin QuickCare Clinic</small></span>
+                            </div>
                         </div>
                         <div class="warning-note">
                             ⚠️ After payment, please upload the receipt below for verification
@@ -90,7 +113,7 @@ $selected_appointment = $_GET['appointment'] ?? '';
                     <div class="form-group">
                         <label>Remarks (Optional)</label>
                         <textarea class="form-control" id="remarks" name="remarks" 
-                                  rows="2" placeholder="Any notes for admin..."></textarea>
+                                  rows="4" placeholder="Any notes for admin..."></textarea>
                     </div>
                     
                     <button type="submit" class="btn btn-primary">Submit Payment Verification</button>
@@ -105,6 +128,11 @@ $selected_appointment = $_GET['appointment'] ?? '';
     max-width: 800px;
     margin: 0 auto;
     padding: 20px;
+}
+
+#remarks {
+    min-height: 120px;
+    resize: none;
 }
 
 .qr-payment-section {
@@ -173,24 +201,67 @@ $selected_appointment = $_GET['appointment'] ?? '';
     display: flex;
     gap: 30px;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+}
+
+.qr-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 232px;
+    flex-shrink: 0;
 }
 
 .qr-code {
     background: white;
-    padding: 15px;
+    padding: 14px;
     border-radius: 12px;
     text-align: center;
     border: 1px solid var(--border);
 }
 
+.qr-title {
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
 .qr-code img {
     width: 200px;
     height: 200px;
+    display: block;
+}
+
+.qr-web-link {
+    width: 200px;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    color: var(--primary);
+    font-weight: 700;
+    text-decoration: none;
+    background: var(--surface2);
+}
+
+.qr-web-link:hover {
+    border-color: var(--primary);
+    background: rgba(124,51,73,0.08);
+}
+
+.qr-caption {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 10px;
 }
 
 .payment-details {
     flex: 1;
+    min-width: 260px;
 }
 
 .amount-display {
@@ -205,15 +276,54 @@ $selected_appointment = $_GET['appointment'] ?? '';
 
 .bank-details {
     background: var(--surface);
-    padding: 15px;
+    padding: 16px;
     border-radius: 8px;
     margin-bottom: 15px;
     border: 1px solid var(--border);
 }
 
-.bank-details p {
-    margin: 8px 0;
+.bank-details-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.bank-detail-row {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 12px;
+    align-items: start;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.bank-detail-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.bank-detail-label {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.bank-detail-value {
+    color: var(--text);
     font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+    text-align: right;
+    word-break: break-word;
+}
+
+.bank-detail-value small {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
 }
 
 .warning-note {
@@ -288,6 +398,24 @@ $selected_appointment = $_GET['appointment'] ?? '';
     
     .qr-container {
         flex-direction: column;
+        align-items: stretch;
+    }
+
+    .qr-stack {
+        width: 100%;
+    }
+
+    .qr-code img {
+        margin: 0 auto;
+    }
+
+    .bank-detail-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
+
+    .bank-detail-value {
+        text-align: left;
     }
 }
 </style>
@@ -304,9 +432,6 @@ function updateAmount() {
         document.getElementById('appointmentCode').value = appointmentId;
         document.getElementById('amount').value = amount;
         
-        const qrData = `QUICKCARE-PAYMENT-${appointmentId}-RM${amount}`;
-        document.getElementById('qrImage').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrData)}`;
-        
         document.getElementById('qrStep').style.display = 'flex';
         document.getElementById('uploadStep').style.display = 'flex';
     } else {
@@ -318,13 +443,23 @@ function updateAmount() {
 // Handle form submission
 document.getElementById('paymentForm')?.addEventListener('submit', async function(e) {
     e.preventDefault();
+
+    const receiptInput = document.getElementById('receipt');
+    const receiptFile = receiptInput.files[0];
+    const maxReceiptSize = 2 * 1024 * 1024;
+
+    if (receiptFile && receiptFile.size > maxReceiptSize) {
+        alert('Receipt file is too large. Please upload a file 2MB or smaller.');
+        receiptInput.focus();
+        return;
+    }
     
     const formData = new FormData();
     formData.append('action', 'submit_payment');
     formData.append('appointment_code', document.getElementById('appointmentCode').value);
     formData.append('amount', document.getElementById('amount').value);
     formData.append('remarks', document.getElementById('remarks').value);
-    formData.append('receipt', document.getElementById('receipt').files[0]);
+    formData.append('receipt', receiptFile);
     
     const response = await fetch('../action.php', {
         method: 'POST',

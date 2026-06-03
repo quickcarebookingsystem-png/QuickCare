@@ -18,6 +18,8 @@ $payments = get_all_payments();
         <button class="tab-btn" data-filter="verifying">Verifying ⏳</button>
         <button class="tab-btn" data-filter="approved">Approved ✅</button>
         <button class="tab-btn" data-filter="rejected">Rejected ❌</button>
+        <button class="tab-btn" data-filter="refund_requested">Refund Requests</button>
+        <button class="tab-btn" data-filter="refunded">Refunded</button>
     </div>
 
     <!-- Payments Table -->
@@ -40,12 +42,16 @@ $payments = get_all_payments();
                     <?php foreach ($payments as $payment): ?>
                     <?php
                         $paymentStatus = strtolower((string) $payment['payment_status']);
-                        $badgeStatus = $paymentStatus === 'approved' ? 'paid' : $paymentStatus;
+                        $badgeStatus = $paymentStatus === 'approved' ? 'paid' : str_replace('_', '-', $paymentStatus);
                         $paymentGroup = $badgeStatus;
                         if (in_array($paymentStatus, ['pending', 'verifying'], true)) {
                             $paymentGroup = 'verifying';
                         } elseif (in_array($paymentStatus, ['paid', 'approved'], true)) {
                             $paymentGroup = 'approved';
+                        } elseif ($paymentStatus === 'refund_requested') {
+                            $paymentGroup = 'refund_requested';
+                        } elseif ($paymentStatus === 'refunded') {
+                            $paymentGroup = 'refunded';
                         }
                     ?>
                     <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>">

@@ -38,6 +38,12 @@ $payments = get_user_payment_history($user_id);
                     } elseif (in_array($payment['payment_status'], ['pending', 'verifying'], true)) {
                         $badgeStatus = 'verifying';
                         $badgeText = 'Verifying';
+                    } elseif ($payment['payment_status'] === 'refund_requested') {
+                        $badgeStatus = 'refund-requested';
+                        $badgeText = 'Refund Requested';
+                    } elseif ($payment['payment_status'] === 'refunded') {
+                        $badgeStatus = 'refunded';
+                        $badgeText = 'Refunded';
                     }
                     ?>
                     <span class="badge badge-<?php echo htmlspecialchars($badgeStatus); ?>">
@@ -55,6 +61,10 @@ $payments = get_user_payment_history($user_id);
                             <span class="detail-value"><?php echo htmlspecialchars($payment['doctor_name']); ?></span>
                         </div>
                         <div class="detail-row">
+                            <span class="detail-label">Appointment Status:</span>
+                            <span class="detail-value"><?php echo htmlspecialchars(ucfirst($payment['appointment_status'] ?? '')); ?></span>
+                        </div>
+                        <div class="detail-row">
                             <span class="detail-label">Amount:</span>
                             <span class="detail-value amount">RM <?php echo number_format($payment['amount'], 2); ?></span>
                         </div>
@@ -68,10 +78,20 @@ $payments = get_user_payment_history($user_id);
                             <span class="detail-value">Admin on <?php echo date('d M Y', strtotime($payment['approved_date'])); ?></span>
                         </div>
                         <?php endif; ?>
-                        <?php if ($payment['payment_status'] == 'rejected' && !empty($payment['remarks'])): ?>
+                        <?php if ($payment['payment_status'] === 'refunded' && !empty($payment['approved_date'])): ?>
                         <div class="detail-row">
-                            <span class="detail-label">Remarks:</span>
-                            <span class="detail-value" style="color: var(--danger);"><?php echo nl2br(htmlspecialchars($payment['remarks'])); ?></span>
+                            <span class="detail-label">Refunded On:</span>
+                            <span class="detail-value"><?php echo date('d M Y', strtotime($payment['approved_date'])); ?></span>
+                        </div>
+                        <?php endif; ?>
+                        <?php
+                            $hasRefundRejectedNote = strpos((string)($payment['remarks'] ?? ''), 'Refund request rejected:') !== false;
+                            $showPaymentNote = !empty($payment['remarks']) && (in_array($payment['payment_status'], ['rejected', 'refund_requested', 'refunded'], true) || $hasRefundRejectedNote);
+                        ?>
+                        <?php if ($showPaymentNote): ?>
+                        <div class="detail-row">
+                            <span class="detail-label"><?php echo (in_array($payment['payment_status'], ['refund_requested', 'refunded'], true) || $hasRefundRejectedNote) ? 'Refund Notes:' : 'Remarks:'; ?></span>
+                            <span class="detail-value" style="color: <?php echo (in_array($payment['payment_status'], ['refund_requested', 'refunded'], true) || $hasRefundRejectedNote) ? 'var(--warning)' : 'var(--danger)'; ?>;"><?php echo nl2br(htmlspecialchars($payment['remarks'])); ?></span>
                         </div>
                         <?php endif; ?>
                     </div>
@@ -83,8 +103,14 @@ $payments = get_user_payment_history($user_id);
                     </button>
                     <?php endif; ?>
 
+                    <?php if (($payment['appointment_status'] ?? '') === 'cancelled' && in_array($payment['payment_status'], ['approved', 'paid'], true)): ?>
+                    <button class="btn-print btn-refund-request" onclick="showRefundRequestModal(<?php echo $payment['payment_id']; ?>)">
+                        Request Refund
+                    </button>
+                    <?php endif; ?>
+
                     <?php if (in_array($payment['payment_status'], ['approved', 'paid'], true)): ?>
-                    <button class="btn-print" onclick="printReceipt(<?php echo $payment['payment_id']; ?>)">
+                    <button class="btn-print btn-view-receipt" onclick="printReceipt(<?php echo $payment['payment_id']; ?>)">
                         View Receipt
                     </button>
                     <?php endif; ?>
@@ -99,6 +125,25 @@ $payments = get_user_payment_history($user_id);
             <?php endforeach; ?>
         </div>
     <?php endif; ?>
+</div>
+
+<!-- Refund Request Modal -->
+<div id="refundRequestModal" class="modal-overlay" style="display: none;">
+    <div class="modal" style="max-width: 420px;">
+        <div class="modal-header">
+            <span class="modal-title">Request Refund</span>
+            <button class="modal-close" onclick="closeRefundRequestModal()">X</button>
+        </div>
+        <div class="modal-body">
+            <p class="text-muted">Please provide a reason for your refund request.</p>
+            <textarea id="refundRequestReason" class="form-control" rows="3" placeholder="e.g., Appointment cancelled"></textarea>
+            <input type="hidden" id="refundRequestPaymentId">
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeRefundRequestModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="confirmRefundRequest()">Submit Request</button>
+        </div>
+    </div>
 </div>
 
 <!-- Payment Proof Modal -->
@@ -296,6 +341,19 @@ $payments = get_user_payment_history($user_id);
     background: var(--primary-dark);
 }
 
+.btn-refund-request {
+    background: var(--warning);
+    margin-right: auto;
+}
+
+.btn-refund-request:hover {
+    background: #a16207;
+}
+
+.btn-view-receipt {
+    margin-left: auto;
+}
+
 .receipt-modal {
     max-width: 500px;
 }
@@ -395,6 +453,42 @@ function viewPaymentProof(receiptImage) {
 
 function closeProofModal() {
     document.getElementById('proofModal').style.display = 'none';
+}
+
+let refundRequestPaymentId = null;
+
+function showRefundRequestModal(paymentId) {
+    refundRequestPaymentId = paymentId;
+    document.getElementById('refundRequestPaymentId').value = paymentId;
+    document.getElementById('refundRequestReason').value = '';
+    document.getElementById('refundRequestModal').style.display = 'flex';
+}
+
+function closeRefundRequestModal() {
+    document.getElementById('refundRequestModal').style.display = 'none';
+    refundRequestPaymentId = null;
+}
+
+async function confirmRefundRequest() {
+    const reason = document.getElementById('refundRequestReason').value;
+    if (!reason.trim()) {
+        alert('Please provide a reason for refund request');
+        return;
+    }
+
+    const response = await fetch('../action.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `action=request_refund&payment_id=${refundRequestPaymentId}&reason=${encodeURIComponent(reason)}`
+    });
+
+    const data = await response.json();
+    if (data.success) {
+        alert('Refund request submitted. Please wait for admin approval.');
+        location.reload();
+    } else {
+        alert('Error: ' + data.message);
+    }
 }
 </script>
 
