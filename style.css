@@ -460,6 +460,22 @@ tbody td { padding: 12px 16px; color: var(--text); }
   text-align: center;
 }
 
+.appt-payment-status-cell {
+  text-align: center;
+}
+
+.appt-payment-status-cell .badge {
+  justify-content: center;
+  text-align: center;
+}
+
+.appt-payment-status-cell .badge-refund-requested,
+.appt-payment-status-cell .badge-refund-rejected {
+  width: 82px;
+  white-space: normal;
+  line-height: 1.2;
+}
+
 .appt-action-menu {
   position: relative;
   display: inline-flex;
@@ -540,8 +556,9 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .badge-unpaid { background: rgba(176,48,48,0.12); color: var(--danger); }
 .badge-completed { background: rgba(42,95,143,0.12); color: var(--info); }
 .badge-paid { background: rgba(42,127,90,0.12); color: var(--success); }
-.badge-refund-requested { background: rgba(194,122,26,0.12); color: var(--warning); }
-.badge-refunded { background: rgba(194,122,26,0.12); color: var(--warning); }
+.badge-refund-requested { background: rgba(42,95,143,0.12); color: var(--info); justify-content: center; text-align: center; }
+.badge-refunded { background: rgba(42,127,90,0.12); color: var(--success); }
+.badge-refund-rejected { background: rgba(176,48,48,0.12); color: var(--danger); justify-content: center; text-align: center; }
 .badge-cancelled { background: rgba(176,48,48,0.12); color: var(--danger); }
 .badge-active { background: rgba(42,127,90,0.12); color: var(--success); }
 .badge-inactive { background: rgba(107,114,128,0.12); color: var(--text-muted); }
@@ -1207,6 +1224,11 @@ tbody td { padding: 12px 16px; color: var(--text); }
   text-align: right;
   font-size: 1.15rem;
   font-weight: 400;
+}
+
+.appointment-detail-list strong .badge {
+  justify-content: center;
+  text-align: center;
 }
 
 #detailNotes {

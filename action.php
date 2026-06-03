@@ -263,16 +263,29 @@ if ($action === 'get_payment_details') {
     $stmt->close();
     
     if ($payment) {
+        $payment_status_label = ucwords(str_replace('_', ' ', (string)$payment['payment_status']));
+        $payment_note = payment_note_display($payment['payment_status'], $payment['remarks'] ?? '');
+        $refund_receipt_file = payment_refund_receipt_file($payment['remarks'] ?? '');
+        $refund_receipt_html = '';
+        if ($refund_receipt_file !== '') {
+            $refund_receipt_url = app_url('uploads/receipts/' . rawurlencode($refund_receipt_file));
+            $refund_receipt_html = '<div class="detail-row"><strong>Refund Receipt:</strong> <a class="btn btn-outline btn-sm" target="_blank" rel="noopener" href="' . htmlspecialchars($refund_receipt_url) . '">Open</a></div>';
+        }
+        $remarks_html = '';
+        if ($payment_note['text'] !== '') {
+            $remarks_html = '<div class="detail-row"><strong>' . htmlspecialchars($payment_note['label']) . '</strong> ' . nl2br(htmlspecialchars($payment_note['text'])) . '</div>';
+        }
         $html = '
         <div class="payment-details-modal">
             <div class="detail-row"><strong>Receipt #:</strong> ' . htmlspecialchars($payment['receipt_number']) . '</div>
             <div class="detail-row"><strong>Patient:</strong> ' . htmlspecialchars($payment['user_name']) . '</div>
             <div class="detail-row"><strong>Email:</strong> ' . htmlspecialchars($payment['user_email']) . '</div>
             <div class="detail-row"><strong>Amount:</strong> RM ' . number_format($payment['amount'], 2) . '</div>
-            <div class="detail-row"><strong>Status:</strong> ' . htmlspecialchars(ucfirst($payment['payment_status'])) . '</div>
+            <div class="detail-row"><strong>Status:</strong> ' . htmlspecialchars($payment_status_label) . '</div>
             <div class="detail-row"><strong>Transaction ID:</strong> ' . htmlspecialchars($payment['transaction_id']) . '</div>
             <div class="detail-row"><strong>Appointment Code:</strong> ' . htmlspecialchars($payment['appointment_code']) . '</div>
-            <div class="detail-row"><strong>Remarks:</strong> ' . nl2br(htmlspecialchars($payment['remarks'])) . '</div>
+            ' . $remarks_html . '
+            ' . $refund_receipt_html . '
             <div class="detail-row"><strong>Submitted:</strong> ' . date('d/m/Y h:i A', strtotime($payment['payment_date'])) . '</div>
         </div>';
         
@@ -301,7 +314,7 @@ if ($action === 'get_receipt') {
 if ($action === 'get_pending_payments_count') {
     global $conn;
     
-    $result = $conn->query("SELECT COUNT(*) as count FROM payments WHERE payment_status IN ('verifying', 'pending')");
+    $result = $conn->query("SELECT COUNT(*) as count FROM payments WHERE payment_status IN ('verifying', 'pending', 'refund_requested')");
     $row = $result->fetch_assoc();
     
     echo json_encode(['count' => $row['count']]);
@@ -907,13 +920,42 @@ if ($action === 'refund_payment') {
     $payment_id = $_POST['payment_id'] ?? 0;
     $reason = $_POST['reason'] ?? 'No reason provided';
     $admin_id = $_SESSION['id'];
+    $refund_receipt = '';
 
     if (empty($payment_id)) {
         echo json_encode(['success' => false, 'message' => 'Invalid payment ID']);
         exit;
     }
 
-    $result = refund_payment($payment_id, $admin_id, $reason);
+    if (!isset($_FILES['refund_receipt']) || $_FILES['refund_receipt']['error'] !== UPLOAD_ERR_OK) {
+        echo json_encode(['success' => false, 'message' => 'Please upload refund receipt or screenshot']);
+        exit;
+    }
+
+    if ($_FILES['refund_receipt']['size'] > 2 * 1024 * 1024) {
+        echo json_encode(['success' => false, 'message' => 'File too large. Max 2MB']);
+        exit;
+    }
+
+    $allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+    if (!in_array($_FILES['refund_receipt']['type'], $allowed_types, true)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid file type. JPG, PNG, PDF only']);
+        exit;
+    }
+
+    $upload_dir = __DIR__ . '/uploads/receipts/';
+    if (!is_dir($upload_dir)) {
+        mkdir($upload_dir, 0777, true);
+    }
+
+    $file_extension = strtolower(pathinfo($_FILES['refund_receipt']['name'], PATHINFO_EXTENSION));
+    $refund_receipt = 'refund_receipt_' . time() . '_' . rand(1000, 9999) . '.' . $file_extension;
+    if (!move_uploaded_file($_FILES['refund_receipt']['tmp_name'], $upload_dir . $refund_receipt)) {
+        echo json_encode(['success' => false, 'message' => 'Failed to upload refund receipt']);
+        exit;
+    }
+
+    $result = refund_payment($payment_id, $admin_id, $reason, $refund_receipt);
 
     if ($result) {
         echo json_encode(['success' => true, 'message' => 'Payment refunded']);

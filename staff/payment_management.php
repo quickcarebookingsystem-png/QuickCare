@@ -20,6 +20,7 @@ $payments = get_all_payments();
         <button class="tab-btn" data-filter="rejected">Rejected ❌</button>
         <button class="tab-btn" data-filter="refund_requested">Refund Requests</button>
         <button class="tab-btn" data-filter="refunded">Refunded</button>
+        <button class="tab-btn" data-filter="refund_rejected">Refund Rejected</button>
     </div>
 
     <!-- Payments Table -->
@@ -52,6 +53,8 @@ $payments = get_all_payments();
                             $paymentGroup = 'refund_requested';
                         } elseif ($paymentStatus === 'refunded') {
                             $paymentGroup = 'refunded';
+                        } elseif ($paymentStatus === 'refund_rejected') {
+                            $paymentGroup = 'refund_rejected';
                         }
                     ?>
                     <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>">
@@ -221,6 +224,15 @@ $payments = get_all_payments();
 .status-rejected {
     background: rgba(176,48,48,0.12);
     color: var(--danger);
+}
+
+.staff-payment-container .badge-refund-requested,
+.staff-payment-container .badge-refund-rejected {
+    display: inline-block;
+    width: 82px;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.2;
 }
 
 .btn-view, .btn-view-details {

@@ -613,7 +613,8 @@ function render_dashboard($role) {
     function setDetailBadge(id, status) {
         const target = document.getElementById(id);
         if (!target) return;
-        target.innerHTML = "<span class=\"badge badge-" + status + "\">" + formatStatusLabel(status) + "</span>";
+        const badgeClass = status.replace(/_/g, "-");
+        target.innerHTML = "<span class=\"badge badge-" + badgeClass + "\">" + formatStatusLabel(status) + "</span>";
     }
     function trimDetailNotes(notes) {
         notes = (notes || "").trim();
@@ -739,7 +740,7 @@ function render_stats($role) {
     $totalUsers = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ?", 's', ['user'])[0]['total'] ?? 0);
 
     $totalAppointments = count_appointments($conn);
-    $pendingApprovalRows = fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM payments WHERE payment_status IN ('verifying', 'pending')");
+    $pendingApprovalRows = fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM payments WHERE payment_status IN ('verifying', 'pending', 'refund_requested')");
     $pendingApprovals = (int) ($pendingApprovalRows[0]['total'] ?? 0);
     $revenueRows = fetch_all_assoc($conn, "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_status = ?", 's', ['paid']);
     $totalRevenue = (float) ($revenueRows[0]['total'] ?? 0);
@@ -767,9 +768,54 @@ function badge($status) {
         'refunded' => 'Refunded',
         'refund_requested' => 'Refund Requested',
         'refund-requested' => 'Refund Requested',
+        'refund_rejected' => 'Refund Rejected',
+        'refund-rejected' => 'Refund Rejected',
     ];
     $label = $labels[$status] ?? ucfirst($status);
-    return '<span class="badge badge-' . e($status) . '">' . e($label) . '</span>';
+    $badgeClass = str_replace('_', '-', $status);
+    return '<span class="badge badge-' . e($badgeClass) . '">' . e($label) . '</span>';
+}
+
+function payment_note_display($status, $remarks) {
+    $status = strtolower((string)$status);
+    $remarks = trim((string)$remarks);
+    if ($remarks === '') {
+        return ['label' => '', 'text' => '', 'is_refund' => false];
+    }
+
+    $lines = preg_split('/\R+/', $remarks);
+    $lines = array_values(array_filter(array_map('trim', $lines), fn($line) => $line !== ''));
+
+    if (in_array($status, ['refund_requested', 'refunded', 'refund_rejected'], true)) {
+        $refundLines = array_values(array_filter($lines, function($line) use ($status) {
+            if (stripos($line, 'Refunded:') === 0) {
+                return false;
+            }
+            if ($status === 'refunded') {
+                return stripos($line, 'Refund requested:') === 0;
+            }
+            return stripos($line, 'Refund requested:') === 0 || stripos($line, 'Refund request rejected:') === 0;
+        }));
+
+        return [
+            'label' => 'Refund Notes:',
+            'text' => implode("\n", $refundLines),
+            'is_refund' => true,
+        ];
+    }
+
+    return ['label' => 'Remarks:', 'text' => $remarks, 'is_refund' => false];
+}
+
+function payment_refund_receipt_file($remarks) {
+    $lines = preg_split('/\R+/', (string)$remarks);
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if (stripos($line, 'Refund receipt:') === 0) {
+            return trim(substr($line, strlen('Refund receipt:')));
+        }
+    }
+    return '';
 }
 
 function appointment_badge($status, $role = null) {
@@ -1091,7 +1137,7 @@ function render_appointments($role) {
     }
 
     foreach ($appointments as $a) {
-        echo '<tr><td>' . e($a['appointment_code']) . '</td><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e($a['service_name']) . '</td><td data-date="' . e($a['appointment_date']) . '">' . e(format_date_display($a['appointment_date'])) . '</td><td>' . e(format_time_display($a['appointment_time'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td>' . badge($a['payment_status']) . '</td><td class="appt-actions-cell">' . appointment_actions($role, $a) . '</td></tr>';
+        echo '<tr><td>' . e($a['appointment_code']) . '</td><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e($a['service_name']) . '</td><td data-date="' . e($a['appointment_date']) . '">' . e(format_date_display($a['appointment_date'])) . '</td><td>' . e(format_time_display($a['appointment_time'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td class="appt-payment-status-cell">' . badge($a['payment_status']) . '</td><td class="appt-actions-cell">' . appointment_actions($role, $a) . '</td></tr>';
     }
 
     echo '</tbody></table></div></div>';
@@ -1104,12 +1150,14 @@ function render_appointments($role) {
     echo '<script>
     function formatStatusLabel(status) {
         const labels = { unpaid: "Unpaid", paid: "Paid" };
-        return labels[status] || (status ? status.charAt(0).toUpperCase() + status.slice(1) : "");
+        if (labels[status]) return labels[status];
+        return status ? status.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase()) : "";
     }
     function setDetailBadge(id, status) {
         const target = document.getElementById(id);
         if (!target) return;
-        target.innerHTML = "<span class=\"badge badge-" + status + "\">" + formatStatusLabel(status) + "</span>";
+        const badgeClass = status.replace(/_/g, "-");
+        target.innerHTML = "<span class=\"badge badge-" + badgeClass + "\">" + formatStatusLabel(status) + "</span>";
     }
     function trimDetailNotes(notes) {
         notes = (notes || "").trim();
@@ -2310,7 +2358,7 @@ function reject_payment($payment_id, $admin_id, $reason) {
 }
 
 // Refund payment (admin)
-function refund_payment($payment_id, $admin_id, $reason) {
+function refund_payment($payment_id, $admin_id, $reason, $refund_receipt = '') {
     global $conn;
 
     $conn->begin_transaction();
@@ -2330,16 +2378,27 @@ function refund_payment($payment_id, $admin_id, $reason) {
             throw new Exception('Only refund requests can be approved');
         }
 
-        $refundNote = trim($reason) !== '' ? trim($reason) : 'No reason provided';
-        $stmt = $conn->prepare("
-            UPDATE payments
-            SET payment_status = 'refunded',
-                approved_by = ?,
-                approved_date = NOW(),
-                remarks = CONCAT(COALESCE(remarks, ''), '\nRefunded: ', ?)
-            WHERE payment_id = ?
-        ");
-        $stmt->bind_param("isi", $admin_id, $refundNote, $payment_id);
+        $refund_receipt = trim((string)$refund_receipt);
+        if ($refund_receipt !== '') {
+            $stmt = $conn->prepare("
+                UPDATE payments
+                SET payment_status = 'refunded',
+                    approved_by = ?,
+                    approved_date = NOW(),
+                    remarks = CONCAT(COALESCE(remarks, ''), '\nRefund receipt: ', ?)
+                WHERE payment_id = ?
+            ");
+            $stmt->bind_param("isi", $admin_id, $refund_receipt, $payment_id);
+        } else {
+            $stmt = $conn->prepare("
+                UPDATE payments
+                SET payment_status = 'refunded',
+                    approved_by = ?,
+                    approved_date = NOW()
+                WHERE payment_id = ?
+            ");
+            $stmt->bind_param("ii", $admin_id, $payment_id);
+        }
         $stmt->execute();
         $stmt->close();
 
@@ -2353,7 +2412,7 @@ function refund_payment($payment_id, $admin_id, $reason) {
         $conn->commit();
 
         $payment['payment_status'] = 'refunded';
-        send_payment_refunded_email($payment['user_id'], $payment, $refundNote);
+        send_payment_refunded_email($payment['user_id'], $payment, '');
 
         return true;
     } catch (Exception $e) {
@@ -2386,7 +2445,7 @@ function reject_refund_request($payment_id, $admin_id, $reason) {
         $rejectNote = trim($reason) !== '' ? trim($reason) : 'No reason provided';
         $stmt = $conn->prepare("
             UPDATE payments
-            SET payment_status = 'paid',
+            SET payment_status = 'refund_rejected',
                 approved_by = ?,
                 approved_date = NOW(),
                 remarks = CONCAT(COALESCE(remarks, ''), '\nRefund request rejected: ', ?)
@@ -2397,7 +2456,7 @@ function reject_refund_request($payment_id, $admin_id, $reason) {
         $stmt->close();
 
         if ($payment['appointment_code']) {
-            $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'paid' WHERE appointment_code = ?");
+            $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'refund_rejected' WHERE appointment_code = ?");
             $stmt->bind_param("s", $payment['appointment_code']);
             $stmt->execute();
             $stmt->close();
@@ -2548,7 +2607,7 @@ function send_payment_refunded_email($user_id, $payment, $reason) {
         <h2>Payment Refunded</h2>
         <p>Dear {$user['name']},</p>
         <p>Your payment has been <strong>REFUNDED</strong>.</p>
-        <p><strong>Reason:</strong> {$reason}</p>
+        " . (trim((string)$reason) !== '' ? "<p><strong>Reason:</strong> {$reason}</p>" : "") . "
         <h3>Payment Details:</h3>
         <ul>
             <li><strong>Receipt Number:</strong> {$payment['receipt_number']}</li>

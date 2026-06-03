@@ -44,6 +44,9 @@ $payments = get_user_payment_history($user_id);
                     } elseif ($payment['payment_status'] === 'refunded') {
                         $badgeStatus = 'refunded';
                         $badgeText = 'Refunded';
+                    } elseif ($payment['payment_status'] === 'refund_rejected') {
+                        $badgeStatus = 'refund-rejected';
+                        $badgeText = 'Refund Rejected';
                     }
                     ?>
                     <span class="badge badge-<?php echo htmlspecialchars($badgeStatus); ?>">
@@ -85,13 +88,13 @@ $payments = get_user_payment_history($user_id);
                         </div>
                         <?php endif; ?>
                         <?php
-                            $hasRefundRejectedNote = strpos((string)($payment['remarks'] ?? ''), 'Refund request rejected:') !== false;
-                            $showPaymentNote = !empty($payment['remarks']) && (in_array($payment['payment_status'], ['rejected', 'refund_requested', 'refunded'], true) || $hasRefundRejectedNote);
+                            $paymentNote = payment_note_display($payment['payment_status'], $payment['remarks'] ?? '');
+                            $showPaymentNote = $paymentNote['text'] !== '';
                         ?>
                         <?php if ($showPaymentNote): ?>
                         <div class="detail-row">
-                            <span class="detail-label"><?php echo (in_array($payment['payment_status'], ['refund_requested', 'refunded'], true) || $hasRefundRejectedNote) ? 'Refund Notes:' : 'Remarks:'; ?></span>
-                            <span class="detail-value" style="color: <?php echo (in_array($payment['payment_status'], ['refund_requested', 'refunded'], true) || $hasRefundRejectedNote) ? 'var(--warning)' : 'var(--danger)'; ?>;"><?php echo nl2br(htmlspecialchars($payment['remarks'])); ?></span>
+                            <span class="detail-label"><?php echo htmlspecialchars($paymentNote['label']); ?></span>
+                            <span class="detail-value" style="color: <?php echo (in_array($payment['payment_status'], ['refund_requested', 'refunded'], true)) ? 'var(--warning)' : 'var(--danger)'; ?>;"><?php echo nl2br(htmlspecialchars($paymentNote['text'])); ?></span>
                         </div>
                         <?php endif; ?>
                     </div>
@@ -258,6 +261,12 @@ $payments = get_user_payment_history($user_id);
 .payment-date {
     font-size: 12px;
     color: var(--text-muted);
+}
+
+.payment-header .badge {
+    min-width: 96px;
+    justify-content: center;
+    text-align: center;
 }
 
 .status-badge {
