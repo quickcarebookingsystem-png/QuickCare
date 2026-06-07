@@ -66,7 +66,7 @@ $payments = get_user_payment_history($user_id);
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">Appointment Status:</span>
-                            <span class="detail-value"><?php echo htmlspecialchars(ucfirst($payment['appointment_status'] ?? '')); ?></span>
+                            <span class="detail-value"><?php echo appointment_badge($payment['appointment_status'] ?? '', 'user'); ?></span>
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">Amount:</span>
