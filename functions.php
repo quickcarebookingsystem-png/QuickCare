@@ -1924,10 +1924,17 @@ function render_appointments($role) {
                 openPaymentProof(button.dataset.proofUrl || "", button.dataset.proofExt || "");
             };
         } else if (["paid", "refund_requested", "refund_rejected"].includes(payment)) {
-            action.textContent = "View Receipt";
-            action.onclick = function () {
-                printAppointmentReceipt(Number(button.dataset.receiptId || 0));
-            };
+            if ("' . e($role) . '" === "staff") {
+                action.textContent = "View Payment Proof";
+                action.onclick = function () {
+                    openPaymentProof(button.dataset.proofUrl || "", button.dataset.proofExt || "");
+                };
+            } else {
+                action.textContent = "View Receipt";
+                action.onclick = function () {
+                    printAppointmentReceipt(Number(button.dataset.receiptId || 0));
+                };
+            }
         } else if (payment === "refunded") {
             action.textContent = "View Refund Proof";
             action.onclick = function () {
