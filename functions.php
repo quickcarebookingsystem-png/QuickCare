@@ -2124,17 +2124,6 @@ function render_appointments($role) {
     </script>';
 }
 
-function render_book_legacy() {
-    global $conn;
-    $services = get_services($conn);
-    $doctors = get_doctors($conn);
-    echo '<form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="book_appointment"><div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Choose Service</span></div><div class="card-body"><div class="services-grid">';
-    foreach ($services as $s) echo '<label class="service-card"><input type="radio" name="service" value="' . e($s['service_name']) . '" required> <span class="service-icon">' . e($s['service_icon']) . '</span><div class="service-name">' . e($s['service_name']) . '</div><div class="service-price">RM ' . e(number_format((float) $s['service_price'], 2)) . '</div><div class="service-desc">' . e($s['service_description']) . '</div></label>';
-    echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Choose Doctor</span></div><div class="card-body"><div class="doctor-grid">';
-    foreach ($doctors as $d) echo '<label class="doctor-card"><input type="radio" name="doctor" value="' . e($d['doctor_name']) . '" required>' . doctor_avatar_html($d) . '<div class="doctor-name">' . e($d['doctor_name']) . '</div><div class="doctor-spec">' . e($d['doctor_specialist']) . '</div><div class="doctor-avail">Available ' . e($d['available_days'] ?: 'Not scheduled') . '</div></label>';
-    echo '</div></div></div></div><div class="card mt-20"><div class="card-header"><span class="card-title">Date, Time & Notes</span></div><div class="card-body"><div class="grid-2"><div class="form-group"><label>Date</label><input class="form-control" type="date" name="date" required></div><div class="form-group"><label>Time</label><select class="form-control" name="time" required><option>09:00</option><option>09:30</option><option>10:00</option><option>10:30</option><option>11:00</option><option>14:00</option></select></div></div><div class="form-group"><label>Symptoms / Notes</label><textarea class="form-control" rows="5" name="notes" placeholder="e.g. Fever for 3 days, headache…"></textarea></div><button class="btn btn-primary" style="width:auto">Confirm Appointment</button></div></div></form>';
-}
-
 function render_book() {
     global $conn;
     $services = get_services($conn);
