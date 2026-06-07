@@ -992,26 +992,90 @@ if ($action === 'reject_refund') {
 }
 
 if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $id = (int)($_POST['id'] ?? 0);
     $icon = trim($_POST['icon'] ?? '👨‍⚕️');
     $name = trim($_POST['name'] ?? '');
     $specialization = trim($_POST['specialization'] ?? '');
+    $available_days = $_POST['available_days'] ?? [];
 
     if ($name !== '') {
-        $stmt = $conn->prepare("INSERT INTO doctors (doctor_icon, doctor_name, doctor_specialist) VALUES (?, ?, ?)");
-        $stmt->bind_param("sss", $icon, $name, $specialization);
-        $stmt->execute();
-        $stmt->close();
+        if ($id > 0) {
+            // Update existing doctor
+            $stmt = $conn->prepare("UPDATE doctors SET doctor_icon = ?, doctor_name = ?, doctor_specialist = ? WHERE doctor_id = ?");
+            $stmt->bind_param("sssi", $icon, $name, $specialization, $id);
+            $stmt->execute();
+            $stmt->close();
+            $doctor_id = $id;
+
+            // Clear old schedule to replace with new selection
+            $stmtClear = $conn->prepare("DELETE FROM doctor_schedule WHERE doctor_id = ?");
+            $stmtClear->bind_param("i", $id);
+            $stmtClear->execute();
+            $stmtClear->close();
+        } else {
+            // Insert new doctor
+            $stmt = $conn->prepare("INSERT INTO doctors (doctor_icon, doctor_name, doctor_specialist) VALUES (?, ?, ?)");
+            $stmt->bind_param("sss", $icon, $name, $specialization);
+            $stmt->execute();
+            $doctor_id = $conn->insert_id;
+            $stmt->close();
+        }
+
+        if ($doctor_id > 0 && !empty($available_days)) {
+            $stmtDays = $conn->prepare("INSERT INTO doctor_schedule (doctor_id, available_day, start_time, end_time) VALUES (?, ?, '09:00:00', '17:00:00')");
+            foreach ($available_days as $day) {
+                $stmtDays->bind_param("is", $doctor_id, $day);
+                $stmtDays->execute();
+            }
+            $stmtDays->close();
+        }
     }
 }
 
 if ($action === 'delete') {
     $type = $_GET['type'] ?? '';
-    $id = (int) ($_GET['id'] ?? 0);
+    $id = (int)($_POST['id'] ?? $_GET['id'] ?? 0);
     if ($type === 'doctor' && $id > 0) {
-        $stmt = $conn->prepare("DELETE FROM doctors WHERE doctor_id = ?");
-        $stmt->bind_param("i", $id);
-        $stmt->execute();
-        $stmt->close();
+        $conn->begin_transaction();
+        try {
+            // 1. Get doctor name to clear appointments (linked by string name in this system)
+            $stmtName = $conn->prepare("SELECT doctor_name FROM doctors WHERE doctor_id = ?");
+            $stmtName->bind_param("i", $id);
+            $stmtName->execute();
+            $resName = $stmtName->get_result()->fetch_assoc();
+            $docName = $resName['doctor_name'] ?? '';
+            $stmtName->close();
+
+            // 2. Clear appointments referencing this doctor name
+            if ($docName !== '') {
+                $stmtAppt = $conn->prepare("UPDATE appointments SET doctor_name = 'Unassigned' WHERE doctor_name = ?");
+                $stmtAppt->bind_param("s", $docName);
+                $stmtAppt->execute();
+                $stmtAppt->close();
+            }
+
+            // 3. Delete from schedule to satisfy FK constraints
+            $stmtSched = $conn->prepare("DELETE FROM doctor_schedule WHERE doctor_id = ?");
+            $stmtSched->bind_param("i", $id);
+            $stmtSched->execute();
+            $stmtSched->close();
+
+            // 4. Delete the doctor
+            $stmtDoc = $conn->prepare("DELETE FROM doctors WHERE doctor_id = ?");
+            $stmtDoc->bind_param("i", $id);
+            $stmtDoc->execute();
+            if ($stmtDoc->affected_rows === 0) {
+                throw new Exception("Doctor ID $id not found in database.");
+            }
+            $stmtDoc->close();
+
+            $conn->commit();
+            $message = "Doctor deleted successfully.";
+        } catch (Exception $e) {
+            $conn->rollback();
+            $message = "Error deleting doctor: " . $e->getMessage();
+            $_SESSION['QuickCare_message_type'] = "error";
+        }
     } elseif ($type === 'staff' && $id > 0) {
         $stmt = $conn->prepare("DELETE FROM users WHERE user_id = ? AND role = 'staff'");
         $stmt->bind_param("i", $id);
@@ -1033,7 +1097,7 @@ $message = match ($action) {
     'update_status' => 'Status updated.',
     'process_payment' => 'Payment processed successfully.',
     'export_report' => 'Report exported.',
-    'delete' => 'Deleted successfully.',
+    'delete' => $message ?? 'Deleted successfully.',
     'submit_payment' => 'Payment submitted successfully. Please wait for admin approval.',
     'approve_payment' => 'Payment has been approved. Email sent to patient.',
     'reject_payment' => 'Payment has been rejected. Email sent to patient.',
