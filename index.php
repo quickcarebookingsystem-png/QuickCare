@@ -1,31 +1,29 @@
 <?php  
 require_once __DIR__ . '/functions.php';
 app_header('QuickCare - Clinic Booking System');
+$landingServices = get_services($conn);
 ?>
 <body>
-<div class="landing-page">
+<div class="landing-page" id="top">
   <header class="landing-header">
-    <a class="landing-brand" href="index.php" draggable="false">
+    <a class="landing-brand" href="#top" draggable="false">
       <span class="logo-icon landing-logo-mark">🏥</span>
       <span>QuickCare</span>
     </a>
     <nav class="landing-nav" aria-label="Main navigation">
-      <a class="landing-link" href="index.php" draggable="false">Home</a>
+      <a class="landing-link" href="#top" draggable="false">Home</a>
       <div class="landing-dropdown">
-        <a class="landing-link" href="doctors.php" draggable="false">About Us <span class="dropdown-arrow">▾</span></a>
+        <a class="landing-link" href="#about" draggable="false">About Us <span class="dropdown-arrow">▾</span></a>
         <div class="landing-dropdown-content">
-          <a href="doctors.php" draggable="false">Our Doctors</a>
+          <a href="#doctors" draggable="false">Our Doctors</a>
         </div>
       </div>
       <div class="landing-dropdown">
         <a class="landing-link" href="#services" draggable="false">Services <span class="dropdown-arrow">▾</span></a>
         <div class="landing-dropdown-content">
-          <a href="javascript:void(0)" onclick="openServiceDetailByName('General Check-up')" draggable="false">General Check-up</a>
-          <a href="javascript:void(0)" onclick="openServiceDetailByName('Dental Care')" draggable="false">Dental Care</a>
-          <a href="javascript:void(0)" onclick="openServiceDetailByName('Eye Examination')" draggable="false">Eye Examination</a>
-          <a href="javascript:void(0)" onclick="openServiceDetailByName('Vaccination')" draggable="false">Vaccination</a>
-          <a href="javascript:void(0)" onclick="openServiceDetailByName('Blood Test')" draggable="false">Blood Test</a>
-          <a href="javascript:void(0)" onclick="openServiceDetailByName('Cardiology')" draggable="false">Cardiology</a>
+          <?php foreach ($landingServices as $service): ?>
+            <a href="javascript:void(0)" onclick="openServiceDetailByName(<?php echo e(json_encode($service['service_name'])); ?>)" draggable="false"><?php echo e($service['service_name']); ?></a>
+          <?php endforeach; ?>
         </div>
       </div>
       <a class="landing-link" href="contact.php" draggable="false">Contact</a>
@@ -81,12 +79,23 @@ app_header('QuickCare - Clinic Booking System');
       </div>
     </section>
 
-    <section class="landing-section">
+    <section class="landing-section" id="about">
       <div class="landing-section-heading">
         <h2>System Features</h2>
         <p>Focused tools for patients who want a smoother clinic booking experience.</p>
       </div>
       <?php render_features(); ?>
+    </section>
+
+    <section class="landing-section" id="doctors">
+      <div class="landing-section-heading">
+        <span class="landing-kicker">Expert Medical Team</span>
+        <h2>Meet Our Doctors</h2>
+        <p>Our team of highly qualified specialists is dedicated to providing the best healthcare services for you and your family.</p>
+      </div>
+      <div style="max-width: 1120px; margin: 0 auto;">
+        <?php render_doctors('guest', false); ?>
+      </div>
     </section>
 
     <section class="landing-section" id="services">
@@ -110,7 +119,7 @@ app_header('QuickCare - Clinic Booking System');
   <footer class="landing-footer">
     <div class="footer-container">
       <div class="footer-brand">
-        <a class="landing-brand" href="index.php" draggable="false">
+        <a class="landing-brand" href="#top" draggable="false">
           <span class="logo-icon landing-logo-mark">🏥</span>
           <span>QuickCare</span>
         </a>
@@ -118,19 +127,16 @@ app_header('QuickCare - Clinic Booking System');
       </div>
       <div class="footer-nav-col">
         <h3>Quick Links</h3>
-        <a href="index.php" draggable="false">Home</a>
+        <a href="#top" draggable="false">Home</a>
         <a href="#about" draggable="false">About Us</a>
         <a href="#services" draggable="false">Services</a>
         <a href="contact.php" draggable="false">Contact</a>
       </div>
       <div class="footer-nav-col">
         <h3>Our Services</h3>
-        <a href="#services" draggable="false">General Check-up</a>
-        <a href="#services" draggable="false">Dental Care</a>
-        <a href="#services" draggable="false">Eye Examination</a>
-        <a href="#services" draggable="false">Vaccination</a>
-        <a href="#services" draggable="false">Blood Test</a>
-        <a href="#services" draggable="false">Cardiology</a>
+        <?php foreach ($landingServices as $service): ?>
+          <a href="javascript:void(0)" onclick="openServiceDetailByName(<?php echo e(json_encode($service['service_name'])); ?>)" draggable="false"><?php echo e($service['service_name']); ?></a>
+        <?php endforeach; ?>
       </div>
     </div>
     <div class="footer-bottom">
@@ -155,6 +161,14 @@ function openServiceDetailByName(serviceName) {
         }
     }
 }
+
+const backToTop = document.querySelector('.back-to-top');
+function updateBackToTop() {
+    if (!backToTop) return;
+    backToTop.classList.toggle('visible', window.scrollY > 220);
+}
+window.addEventListener('scroll', updateBackToTop, { passive: true });
+updateBackToTop();
 </script>
 </body>
 </html>

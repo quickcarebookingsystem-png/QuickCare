@@ -16,13 +16,15 @@ if ($action === 'register') {
         $role = 'user';
 
         if (email_exist($conn, $email)) {
-            $_SESSION['message'] = "Email already registered";
+            $_SESSION['QuickCare_message'] = "Email already registered.";
+            $_SESSION['QuickCare_message_type'] = "error";
             redirect_to('register.php');
             exit();
         } 
 
         if (create_user($conn, $name, $email, $password, $role)) {
-            $_SESSION['message'] = "Registration successful";
+            $_SESSION['QuickCare_message'] = "Registration successful. Please log in.";
+            $_SESSION['QuickCare_message_type'] = "success";
             redirect_to('login.php');
             exit();
         }
@@ -41,15 +43,19 @@ if ($action === 'login') {
                 $_SESSION['id'] = $user['user_id'];
                 $_SESSION['name'] = $user['name'];
                 $_SESSION['QuickCare_role'] = $user['role'];
+                $_SESSION['QuickCare_message'] = "Login successful.";
+                $_SESSION['QuickCare_message_type'] = "success";
                 redirect_to(page_url('dashboard', $user['role']));
                 exit();
             } else {
-                $_SESSION['message'] = "Wrong password";
+                $_SESSION['QuickCare_message'] = "Wrong password.";
+                $_SESSION['QuickCare_message_type'] = "error";
                 redirect_to('login.php');
                 exit();
             }
         } else {
-            $_SESSION['message'] = "User not found";
+            $_SESSION['QuickCare_message'] = "User not found.";
+            $_SESSION['QuickCare_message_type'] = "error";
             redirect_to('login.php');
             exit();
         }
@@ -69,11 +75,13 @@ if ($action === 'forgot_password') {
                 <a href='$link'>$link</a>
                 <p>This link will expire in 15 minutes.</p>";
             send_email($to, $subject, $body);
-            $_SESSION['message'] = "Reset link sent to your email.";
+            $_SESSION['QuickCare_message'] = "Reset link sent to your email.";
+            $_SESSION['QuickCare_message_type'] = "success";
             redirect_to('login.php');
             exit();
         } else {
-            $_SESSION['message'] = "Email not found.";
+            $_SESSION['QuickCare_message'] = "Email not found.";
+            $_SESSION['QuickCare_message_type'] = "error";
             redirect_to('forgot_password.php');
             exit();
         }
@@ -496,6 +504,9 @@ if ($action === 'update_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $name = trim($_POST['name'] ?? '');
     $email = trim($_POST['email'] ?? '');
     $phoneNumber = format_phone_number($_POST['phone_number'] ?? '');
+    $gender = trim($_POST['gender'] ?? '');
+    $dateOfBirth = trim($_POST['date_of_birth'] ?? '');
+    $bloodType = trim($_POST['blood_type'] ?? '');
     $back = $_SERVER['HTTP_REFERER'] ?? page_url('staff', 'admin');
 
     if ($id <= 0 || $name === '' || $email === '') {
@@ -503,6 +514,28 @@ if ($action === 'update_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['QuickCare_message_type'] = 'error';
         redirect_to($back);
     }
+
+    if ($dateOfBirth !== '') {
+        try {
+            $dob = new DateTime($dateOfBirth);
+            $today = new DateTime('today');
+            $age = $today->diff($dob)->y;
+
+            if ($dob > $today || $age > 120) {
+                $_SESSION['QuickCare_message'] = 'Please enter a valid date of birth.';
+                $_SESSION['QuickCare_message_type'] = 'error';
+                redirect_to($back);
+            }
+        } catch (Exception $e) {
+            $_SESSION['QuickCare_message'] = 'Please enter a valid date of birth.';
+            $_SESSION['QuickCare_message_type'] = 'error';
+            redirect_to($back);
+        }
+    }
+
+    $gender = $gender === '' ? null : $gender;
+    $dateOfBirth = $dateOfBirth === '' ? null : $dateOfBirth;
+    $bloodType = $bloodType === '' ? null : $bloodType;
 
     $stmt = $conn->prepare("SELECT user_id FROM users WHERE email = ? AND user_id <> ?");
     $stmt->bind_param("si", $email, $id);
@@ -518,10 +551,10 @@ if ($action === 'update_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $stmt = $conn->prepare("
         UPDATE users
-        SET name = ?, email = ?, phone_number = ?
+        SET name = ?, email = ?, phone_number = ?, gender = ?, date_of_birth = ?, blood_type = ?
         WHERE user_id = ? AND role = 'staff'
     ");
-    $stmt->bind_param("sssi", $name, $email, $phoneNumber, $id);
+    $stmt->bind_param("ssssssi", $name, $email, $phoneNumber, $gender, $dateOfBirth, $bloodType, $id);
     $stmt->execute();
     $stmt->close();
 }
@@ -775,17 +808,54 @@ if (in_array($action, ['cancel_appointment', 'approve', 'reject', 'update_status
 }
 
 if ($action === 'save_service' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $icon = trim($_POST['icon'] ?? '🏥');
+    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+        $_SESSION['QuickCare_message'] = 'Only admins can save services.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to(app_url('login.php'));
+    }
+
+    ensure_service_overview_column($conn);
+    $id = (int)($_POST['id'] ?? 0);
     $name = trim($_POST['name'] ?? '');
     $fee = (float) ($_POST['fee'] ?? 0);
     $description = trim($_POST['description'] ?? '');
 
     if ($name !== '') {
-        $stmt = $conn->prepare("INSERT INTO services (service_icon, service_name, service_price, service_description) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param("ssds", $icon, $name, $fee, $description);
+        if ($id > 0) {
+            $stmt = $conn->prepare("UPDATE services SET service_name = ?, service_price = ?, service_description = ? WHERE service_id = ?");
+            $stmt->bind_param("sdsi", $name, $fee, $description, $id);
+        } else {
+            $overview = service_default_overview($name, $description);
+            $stmt = $conn->prepare("INSERT INTO services (service_name, service_price, service_description, service_overview) VALUES (?, ?, ?, ?)");
+            $stmt->bind_param("sdss", $name, $fee, $description, $overview);
+        }
         $stmt->execute();
         $stmt->close();
     }
+}
+
+if ($action === 'update_service_overview' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+        $_SESSION['QuickCare_message'] = 'Only admins can update service overview.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to(app_url('login.php'));
+    }
+
+    $serviceId = (int)($_POST['service_id'] ?? 0);
+    $overview = trim($_POST['service_overview'] ?? '');
+    $back = $_SERVER['HTTP_REFERER'] ?? page_url('services', 'admin');
+
+    if ($serviceId <= 0 || $overview === '') {
+        $_SESSION['QuickCare_message'] = 'Please enter a service overview before saving.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
+
+    ensure_service_overview_column($conn);
+    $stmt = $conn->prepare("UPDATE services SET service_overview = ? WHERE service_id = ?");
+    $stmt->bind_param("si", $overview, $serviceId);
+    $stmt->execute();
+    $stmt->close();
 }
 
 if ($action === 'export_report') {
@@ -1269,6 +1339,30 @@ if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+if ($action === 'update_doctor_description' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+        $_SESSION['QuickCare_message'] = 'Only admins can update doctor description.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to(app_url('login.php'));
+    }
+
+    $doctorId = (int)($_POST['doctor_id'] ?? 0);
+    $description = trim($_POST['doctor_description'] ?? '');
+    $back = $_SERVER['HTTP_REFERER'] ?? page_url('doctors', 'admin');
+
+    if ($doctorId <= 0 || $description === '') {
+        $_SESSION['QuickCare_message'] = 'Please enter about the specialist before saving.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
+
+    ensure_doctor_description_column($conn);
+    $stmt = $conn->prepare("UPDATE doctors SET doctor_description = ? WHERE doctor_id = ?");
+    $stmt->bind_param("si", $description, $doctorId);
+    $stmt->execute();
+    $stmt->close();
+}
+
 if ($action === 'delete') {
     $type = $_GET['type'] ?? '';
     $id = (int)($_POST['id'] ?? $_GET['id'] ?? 0);
@@ -1318,6 +1412,17 @@ if ($action === 'delete') {
         $stmt->bind_param("i", $id);
         $stmt->execute();
         $stmt->close();
+    } elseif ($type === 'service' && $id > 0) {
+        if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+            $_SESSION['QuickCare_message'] = 'Only admins can delete services.';
+            $_SESSION['QuickCare_message_type'] = 'error';
+            redirect_to(app_url('login.php'));
+        }
+
+        $stmt = $conn->prepare("DELETE FROM services WHERE service_id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $stmt->close();
     }
 }
 
@@ -1326,7 +1431,9 @@ $message = match ($action) {
     'save_staff' => 'Staff member saved successfully.',
     'update_staff' => 'Staff member updated successfully.',
     'save_doctor' => 'Doctor saved successfully.',
+    'update_doctor_description' => 'Doctor description updated successfully.',
     'save_service' => 'Service saved successfully.',
+    'update_service_overview' => 'Service overview updated successfully.',
     'save_appointment_notes' => 'Appointment notes updated.',
     'cancel_appointment' => 'Appointment cancelled.',
     'approve' => 'Appointment approved.',

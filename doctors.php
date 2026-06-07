@@ -7,19 +7,19 @@ $doctors = get_doctors($conn);
 <div class="landing-page">
   <header class="landing-header">
     <a class="landing-brand" href="index.php" draggable="false">
-      <span class="logo-icon landing-logo-mark">QC</span>
+      <span class="logo-icon landing-logo-mark">🏥</span>
       <span>QuickCare</span>
     </a>
     <nav class="landing-nav" aria-label="Main navigation">
       <a class="landing-link" href="index.php" draggable="false">Home</a>
       <div class="landing-dropdown">
-        <a class="landing-link" href="doctors.php" draggable="false">About Us <span class="dropdown-arrow">v</span></a>
+        <a class="landing-link" href="doctors.php" draggable="false">About Us <span class="dropdown-arrow">▾</span></a>
         <div class="landing-dropdown-content">
           <a href="doctors.php" draggable="false">Our Doctors</a>
         </div>
       </div>
       <div class="landing-dropdown">
-        <a class="landing-link" href="index.php#services" draggable="false">Services <span class="dropdown-arrow">v</span></a>
+        <a class="landing-link" href="index.php#services" draggable="false">Services <span class="dropdown-arrow">▾</span></a>
         <div class="landing-dropdown-content">
           <a href="index.php#services" draggable="false">General Check-up</a>
           <a href="index.php#services" draggable="false">Dental Care</a>
@@ -61,7 +61,7 @@ $doctors = get_doctors($conn);
     <div class="footer-container">
       <div class="footer-brand">
         <a class="landing-brand" href="index.php" draggable="false">
-          <span class="logo-icon landing-logo-mark">QC</span>
+          <span class="logo-icon landing-logo-mark">🏥</span>
           <span>QuickCare</span>
         </a>
         <p>Providing accessible healthcare through simplified appointment booking and modern management tools.</p>
@@ -88,7 +88,7 @@ $doctors = get_doctors($conn);
     </div>
   </footer>
 
-  <a href="#" class="back-to-top" title="Back to top">^</a>
+  <a href="#" class="back-to-top" title="Back to top">↑</a>
 </div>
 </body>
 </html>

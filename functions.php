@@ -287,6 +287,26 @@ function e($value) {
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
 
+function get_service_icon($serviceName) {
+    $name = strtolower(trim((string)$serviceName));
+
+    // 自动关键词映射逻辑 (不需要数据库)
+    if (str_contains($name, 'dental') || str_contains($name, 'tooth') || str_contains($name, 'teeth')) return '🦷';
+    if (str_contains($name, 'eye') || str_contains($name, 'vision') || str_contains($name, 'optomet')) return '👁️';
+    if (str_contains($name, 'vaccin') || str_contains($name, 'injection') || str_contains($name, 'flu')) return '💉';
+    if (str_contains($name, 'blood')) return '🩸';
+    if (str_contains($name, 'heart') || str_contains($name, 'cardio')) return '🫀';
+    if (str_contains($name, 'child') || str_contains($name, 'pediat')) return '👶';
+    if (str_contains($name, 'physio') || str_contains($name, 'therapy') || str_contains($name, 'rehab')) return '🧘';
+    if (str_contains($name, 'check') || str_contains($name, 'consult') || str_contains($name, 'general')) return '🩺';
+    if (str_contains($name, 'emergency') || str_contains($name, 'ambu')) return '🚑';
+    if (str_contains($name, 'pharmacy') || str_contains($name, 'medicin') || str_contains($name, 'pill')) return '💊';
+    if (str_contains($name, 'lab') || str_contains($name, 'test')) return '🧪';
+    if (str_contains($name, 'bone') || str_contains($name, 'ortho')) return '🦴';
+
+    return '🏥'; // 默认图标
+}
+
 function name_avatar($name) {
     $name = trim((string) $name);
     if ($name === '') {
@@ -326,6 +346,24 @@ function ensure_doctor_image_column($conn) {
     }
 
     return (bool) $conn->query("ALTER TABLE doctors ADD COLUMN doctor_image VARCHAR(255) NULL");
+}
+
+function ensure_doctor_description_column($conn) {
+    $columnCheck = $conn->query("SHOW COLUMNS FROM doctors LIKE 'doctor_description'");
+    if ($columnCheck && $columnCheck->num_rows > 0) {
+        return true;
+    }
+
+    return (bool) $conn->query("ALTER TABLE doctors ADD COLUMN doctor_description TEXT NULL");
+}
+
+function ensure_service_overview_column($conn) {
+    $columnCheck = $conn->query("SHOW COLUMNS FROM services LIKE 'service_overview'");
+    if ($columnCheck && $columnCheck->num_rows > 0) {
+        return true;
+    }
+
+    return (bool) $conn->query("ALTER TABLE services ADD COLUMN service_overview TEXT NULL");
 }
 
 function doctor_avatar_html($doctor, $class = 'doctor-avatar') {
@@ -430,25 +468,75 @@ function count_appointments($conn, $role = null, $conditions = [], $types = '', 
 }
 
 function get_services($conn) {
+    ensure_service_overview_column($conn);
     return fetch_all_assoc(
         $conn,
-        "SELECT service_id, service_icon, service_name, service_price, service_description
+        "SELECT service_id, service_name, service_price, service_description, service_overview
          FROM services
          ORDER BY service_id ASC"
     );
 }
 
+function service_default_overview($serviceName, $fallback = '') {
+    $name = strtolower((string) $serviceName);
+
+    if (str_contains($name, 'general check-up')) {
+        return "Our comprehensive General Check-up is designed for total health awareness and proactive wellness management. This service includes a full physical examination, vital signs monitoring (blood pressure, heart rate, BMI), and a personalized consultation with our experienced medical practitioners. We focus on early detection of potential health risks and chronic conditions, providing you with professional guidance on maintaining a healthy lifestyle through preventive care tailored to your specific age, gender, and medical history. Regular check-ups are the cornerstone of long-term health, helping you stay ahead of any issues before they become serious.";
+    }
+
+    if (str_contains($name, 'dental care')) {
+        return "Maintain a bright, confident, and healthy smile with our professional Dental Care services. This comprehensive oral health package covers routine clinical examinations, professional scaling and polishing to remove stubborn plaque and tartar, and detailed screening for gum disease, cavities, or other oral issues. Our dental experts utilize state-of-the-art equipment and gentle techniques to ensure your comfort while keeping your oral hygiene at its peak. Beyond treatment, we provide personalized advice on effective brushing, flossing, and long-term dental health maintenance to prevent future complications and ensure your smile lasts a lifetime.";
+    }
+
+    if (str_contains($name, 'eye examination')) {
+        return "Vision is vital to your daily quality of life. Our professional Eye Examination service provides a thorough assessment of your visual acuity and overall ocular health using specialized diagnostic equipment. We screen for common vision problems such as refractive errors (nearsightedness, farsightedness, astigmatism) as well as more serious conditions like glaucoma, cataracts, and diabetic retinopathy. Whether you require a new prescription for corrective lenses or a routine preventative health check for your eyes, our specialists ensure precise testing and professional care. We prioritize preserving your sight and helping you see the world clearly at every stage of life.";
+    }
+
+    if (str_contains($name, 'vaccination')) {
+        return "Protect yourself and your loved ones from preventable diseases with our professional Vaccination services. We offer a wide range of essential immunizations, including seasonal flu shots, travel vaccines for international trips, and standard boosters for adults and children. Our clinical team strictly adheres to national health guidelines for vaccine administration and temperature-controlled storage, ensuring maximum efficacy and safety. We provide a clean, safe environment for your injections and provide accurate, detailed documentation for your permanent medical immunization records. Stay protected and contribute to community health by keeping your vaccines up to date with QuickCare.";
+    }
+
+    if (str_contains($name, 'blood test')) {
+        return "Gain deep, data-driven insights into your internal health with our diagnostic Blood Test services. We provide accurate laboratory analysis for a wide array of critical health markers, including full blood counts, lipid profiles (cholesterol/triglycerides), blood glucose levels for diabetes screening, and specialized kidney or liver function tests. Our collection process is quick, professional, and designed to be as painless as possible. Once processed, the results are interpreted by our medical staff, who will walk you through the findings to help you monitor existing conditions or detect silent health issues early. Regular blood screening is an essential tool for effective health management.";
+    }
+
+    if (str_contains($name, 'cardiology')) {
+        return "Our specialized Cardiology screening focuses on the most important muscle in your body-your heart. This comprehensive service includes thorough cardiovascular risk assessments, blood pressure management, and in-depth consultations regarding your heart health history and lifestyle. We utilize modern diagnostic tools to evaluate cardiac function and identify potential issues such as arrhythmias, hypertension, or coronary artery disease. By catching early warning signs of cardiovascular stress, we help you take proactive, life-saving steps toward a heart-healthy future. Our specialists provide you with a clear roadmap for heart health, including diet and exercise recommendations tailored to your cardiac profile.";
+    }
+
+    return (string) $fallback;
+}
+
 function get_doctors($conn) {
     ensure_doctor_image_column($conn);
+    ensure_doctor_description_column($conn);
     return fetch_all_assoc(
         $conn,
-        "SELECT d.doctor_id, d.doctor_image, d.doctor_name, d.doctor_specialist,
+        "SELECT d.doctor_id, d.doctor_image, d.doctor_name, d.doctor_specialist, d.doctor_description,
                 GROUP_CONCAT(DISTINCT ds.available_day ORDER BY FIELD(ds.available_day, 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun') SEPARATOR ', ') AS available_days
          FROM doctors d
          LEFT JOIN doctor_schedule ds ON ds.doctor_id = d.doctor_id
-         GROUP BY d.doctor_id, d.doctor_image, d.doctor_name, d.doctor_specialist
+         GROUP BY d.doctor_id, d.doctor_image, d.doctor_name, d.doctor_specialist, d.doctor_description
          ORDER BY d.doctor_id ASC"
     );
+}
+
+function doctor_default_description($specialization) {
+    $spec = strtolower((string)$specialization);
+
+    if (str_contains($spec, 'cardiology')) {
+        return "Specializes in diagnosing and treating diseases of the cardiovascular system. This includes managing heart conditions such as coronary artery disease, heart failure, and heart rhythm disorders through advanced diagnostic tools and therapeutic interventions.";
+    }
+
+    if (str_contains($spec, 'dental')) {
+        return "Expert in oral health care, focusing on the diagnosis, prevention, and treatment of conditions affecting the teeth, gums, and mouth. Provides comprehensive services ranging from preventive care and restorative treatments to complex dental surgeries and cosmetic procedures.";
+    }
+
+    if (str_contains($spec, 'eye') || str_contains($spec, 'ophthalmology')) {
+        return "Dedicated to comprehensive eye health and vision care. Expertise includes conducting detailed eye examinations, diagnosing ocular diseases, and performing specialized treatments or surgeries to preserve and enhance patient eyesight.";
+    }
+
+    return "Highly qualified medical professional dedicated to providing expert care and specialized treatment within their field of expertise.";
 }
 
 function get_appointments($conn, $role = null, $appointmentDate = null, $limit = null, $orderByCreatedAt = false) {
@@ -553,6 +641,28 @@ function app_header($title) {
         echo "<script>alert('" . $_SESSION['message'] . "');</script>";
         unset($_SESSION['message']);
     }
+}
+
+function render_notification($placement = 'toast') {
+    if (empty($_SESSION['QuickCare_message'])) {
+        return;
+    }
+
+    $messageType = $_SESSION['QuickCare_message_type'] ?? 'success';
+    if ($placement === 'auth') {
+        echo '<div class="auth-notification ' . e($messageType) . '">' . e($_SESSION['QuickCare_message']) . '</div>';
+    } else {
+        echo '<div class="toast show ' . e($messageType) . '" id="pageNotification">' . e($_SESSION['QuickCare_message']) . '</div>';
+        echo '<script>
+        setTimeout(function () {
+            const notification = document.getElementById("pageNotification");
+            if (!notification) return;
+            notification.classList.remove("show");
+        }, 3500);
+        </script>';
+    }
+    unset($_SESSION['QuickCare_message']);
+    unset($_SESSION['QuickCare_message_type']);
 }
 
 function app_start($role, $page, $title = null) {
@@ -994,7 +1104,7 @@ function render_services($role, $showToolbar = true) {
                     <input class="form-control" type="text" placeholder="Search services…" id="searchServiceInput">
               </div>';
         if ($role === 'admin') {
-            echo '<button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-service\')">
+            echo '<button class="btn btn-primary" style="width:auto" onclick="openAddServiceModal()">
                     + Add Service
                   </button>';
         }
@@ -1002,8 +1112,10 @@ function render_services($role, $showToolbar = true) {
     }
     echo '<div class="services-grid" id="servicesGrid">';
     foreach ($services as $s) {
+        $savedOverview = trim((string)($s['service_overview'] ?? ''));
+        $longDesc = $savedOverview !== '' ? $savedOverview : service_default_overview($s['service_name'], $s['service_description']);
         $name = strtolower($s['service_name']);
-        $longDesc = $s['service_description'];
+        $icon = get_service_icon($s['service_name']);
 
         if (str_contains($name, 'general check-up')) {
             $longDesc = "Our comprehensive General Check-up is designed for total health awareness and proactive wellness management. This service includes a full physical examination, vital signs monitoring (blood pressure, heart rate, BMI), and a personalized consultation with our experienced medical practitioners. We focus on early detection of potential health risks and chronic conditions, providing you with professional guidance on maintaining a healthy lifestyle through preventive care tailored to your specific age, gender, and medical history. Regular check-ups are the cornerstone of long-term health, helping you stay ahead of any issues before they become serious.";
@@ -1019,17 +1131,35 @@ function render_services($role, $showToolbar = true) {
             $longDesc = "Our specialized Cardiology screening focuses on the most important muscle in your body—your heart. This comprehensive service includes thorough cardiovascular risk assessments, blood pressure management, and in-depth consultations regarding your heart health history and lifestyle. We utilize modern diagnostic tools to evaluate cardiac function and identify potential issues such as arrhythmias, hypertension, or coronary artery disease. By catching early warning signs of cardiovascular stress, we help you take proactive, life-saving steps toward a heart-healthy future. Our specialists provide you with a clear roadmap for heart health, including diet and exercise recommendations tailored to your cardiac profile.";
         }
 
+        if ($savedOverview !== '') {
+            $longDesc = $savedOverview;
+        }
+
         echo '<div class="service-card" style="cursor:pointer" onclick="showServiceDetails(this)" 
+                   data-id="' . e($s['service_id']) . '"
                    data-name="' . e($s['service_name']) . '" 
-                   data-icon="' . e($s['service_icon']) . '" 
+                   data-icon="' . e($icon) . '" 
+                   data-fee="' . e(number_format((float) $s['service_price'], 2, '.', '')) . '"
                    data-price="RM ' . e(number_format((float) $s['service_price'], 2)) . '" 
+                   data-short-desc="' . e($s['service_description']) . '"
                    data-desc="' . e($longDesc) . '">
-                <span class="service-icon">' . e($s['service_icon']) . '</span>
+                <span class="service-icon">' . e($icon) . '</span>
                 <div class="service-name">' . e($s['service_name']) . '</div>
                 <div class="service-price">RM ' . e(number_format((float) $s['service_price'], 2)) . '</div>
-                <div class="service-desc">' . e($s['service_description']) . '</div>
-              </div>';
+                <div class="service-desc">' . e($s['service_description']) . '</div>';
+        if ($role === 'admin') {
+            echo '<div class="service-actions" onclick="event.stopPropagation()" onmouseenter="this.closest(\'.service-card\')?.classList.add(\'service-actions-hover\')" onmouseleave="this.closest(\'.service-card\')?.classList.remove(\'service-actions-hover\')">
+                    <button class="btn btn-sm btn-outline" type="button" onclick="openEditServiceModal(event, this)" data-id="' . e($s['service_id']) . '" data-name="' . e($s['service_name']) . '" data-fee="' . e(number_format((float) $s['service_price'], 2, '.', '')) . '" data-description="' . e($s['service_description']) . '" data-overview="' . e($longDesc) . '">✏️</button>
+                    <a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'service', 'id' => (int)$s['service_id']])) . '" onclick="event.stopPropagation(); return confirm(\'Permanently delete this service?\')">🗑</a>
+                  </div>';
+        }
+        echo '</div>';
     }
+    $adminOverviewControls = '';
+    if ($role === 'admin') {
+        $adminOverviewControls = '<button class="btn btn-outline" type="button" id="serviceOverviewEditBtn" style="width:auto; padding: 6px 12px; margin-left:auto;" onclick="toggleServiceOverviewEdit(true)">Edit Overview</button>';
+    }
+
     echo '</div>
     <div class="modal-overlay" id="modal-service-details">
         <div class="modal">
@@ -1045,8 +1175,18 @@ function render_services($role, $showToolbar = true) {
                 <div style="text-align: left; background: var(--surface2); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
                     <h4 style="margin-top: 0; margin-bottom: 12px; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
                         <span>📋</span> Service Overview
+                        ' . $adminOverviewControls . '
                     </h4>
                     <p id="serviceDetailDesc" style="line-height: 1.7; color: var(--text-muted); white-space: pre-wrap; font-size: 0.95rem; margin: 0;"></p>
+                    <form id="serviceOverviewForm" method="post" action="' . e(app_url('action.php')) . '" style="display:none; margin: 0;">
+                        <input type="hidden" name="action" value="update_service_overview">
+                        <input type="hidden" name="service_id" id="serviceOverviewId">
+                        <textarea class="form-control" name="service_overview" id="serviceOverviewTextarea" rows="9" required style="resize: vertical;"></textarea>
+                        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px;">
+                            <button class="btn btn-outline" type="button" style="width:auto" onclick="toggleServiceOverviewEdit(false)">Cancel</button>
+                            <button class="btn btn-primary" type="submit" style="width:auto">Save Overview</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
@@ -1055,11 +1195,30 @@ function render_services($role, $showToolbar = true) {
     if (typeof openModal !== "function") { window.openModal = function(id) { document.getElementById(id).classList.add("active"); }; }
     if (typeof closeModal !== "function") { window.closeModal = function(id) { document.getElementById(id).classList.remove("active"); }; }
     function showServiceDetails(el) {
+        window.currentServiceCard = el;
         document.getElementById("serviceDetailIcon").textContent = el.dataset.icon;
         document.getElementById("serviceDetailName").textContent = el.dataset.name;
         document.getElementById("serviceDetailPrice").textContent = el.dataset.price;
         document.getElementById("serviceDetailDesc").textContent = el.dataset.desc;
+        document.getElementById("serviceOverviewId").value = el.dataset.id || "";
+        document.getElementById("serviceOverviewTextarea").value = el.dataset.desc || "";
+        toggleServiceOverviewEdit(false);
         openModal("modal-service-details");
+    }
+    function toggleServiceOverviewEdit(isEditing) {
+        const desc = document.getElementById("serviceDetailDesc");
+        const form = document.getElementById("serviceOverviewForm");
+        const editBtn = document.getElementById("serviceOverviewEditBtn");
+        const textarea = document.getElementById("serviceOverviewTextarea");
+        if (!desc || !form) return;
+
+        desc.style.display = isEditing ? "none" : "";
+        form.style.display = isEditing ? "" : "none";
+        if (editBtn) editBtn.style.display = isEditing ? "none" : "";
+        if (textarea && window.currentServiceCard) {
+            textarea.value = window.currentServiceCard.dataset.desc || "";
+        }
+        if (isEditing && textarea) textarea.focus();
     }
     document.getElementById("searchServiceInput")?.addEventListener("input", function() {
         const q = this.value.toLowerCase();
@@ -1082,17 +1241,11 @@ function render_doctors($role, $showToolbar = true) {
     foreach ($doctors as $d) {
         $available = $d['available_days'] ?: 'Not scheduled';
 
-        $spec = strtolower($d['doctor_specialist']);
-        $description = "Highly qualified medical professional dedicated to providing expert care and specialized treatment within their field of expertise.";
-        if (str_contains($spec, 'cardiology')) {
-            $description = "Specializes in diagnosing and treating diseases of the cardiovascular system. This includes managing heart conditions such as coronary artery disease, heart failure, and heart rhythm disorders through advanced diagnostic tools and therapeutic interventions.";
-        } elseif (str_contains($spec, 'dental')) {
-            $description = "Expert in oral health care, focusing on the diagnosis, prevention, and treatment of conditions affecting the teeth, gums, and mouth. Provides comprehensive services ranging from preventive care and restorative treatments to complex dental surgeries and cosmetic procedures.";
-        } elseif (str_contains($spec, 'eye') || str_contains($spec, 'ophthalmology')) {
-            $description = "Dedicated to comprehensive eye health and vision care. Expertise includes conducting detailed eye examinations, diagnosing ocular diseases, and performing specialized treatments or surgeries to preserve and enhance patient eyesight.";
-        }
+        $savedDescription = trim((string)($d['doctor_description'] ?? ''));
+        $description = $savedDescription !== '' ? $savedDescription : doctor_default_description($d['doctor_specialist']);
 
         echo '<div class="doctor-card" style="cursor:pointer" onclick="showDoctorDetails(this)" 
+                   data-id="' . e($d['doctor_id']) . '"
                    data-name="' . e($d['doctor_name']) . '" 
                    data-initials="' . e(name_avatar($d['doctor_name'] ?? 'Doctor')) . '" 
                    data-image="' . e($d['doctor_image'] ?? '') . '" 
@@ -1103,8 +1256,12 @@ function render_doctors($role, $showToolbar = true) {
                 <div class="doctor-name">' . e($d['doctor_name']) . '</div>
                 <div class="doctor-spec">' . e($d['doctor_specialist']) . '</div>
                 <div class="doctor-avail">✅ Available ' . e($available) . '</div>';
-        if ($role === 'admin') echo '<div style="margin-top:12px;display:flex;gap:6px;justify-content:center" onclick="event.stopPropagation()"><button class="btn btn-sm btn-outline" onclick="openEditDoctorModal(this)" data-id="' . e($d['doctor_id']) . '" data-name="' . e($d['doctor_name']) . '" data-spec="' . e($d['doctor_specialist']) . '" data-days="' . e($d['available_days']) . '">✏️</button><a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'doctor', 'id' => (int)$d['doctor_id']])) . '" onclick="return confirm(\'Permanently delete this doctor profile?\')">🗑</a></div>';
+        if ($role === 'admin') echo '<div class="doctor-actions" onclick="event.stopPropagation()" onmouseenter="this.closest(\'.doctor-card\')?.classList.add(\'doctor-actions-hover\')" onmouseleave="this.closest(\'.doctor-card\')?.classList.remove(\'doctor-actions-hover\')"><button class="btn btn-sm btn-outline" onclick="openEditDoctorModal(event, this)" data-id="' . e($d['doctor_id']) . '" data-name="' . e($d['doctor_name']) . '" data-spec="' . e($d['doctor_specialist']) . '" data-days="' . e($d['available_days']) . '">✏️</button><a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'doctor', 'id' => (int)$d['doctor_id']])) . '" onclick="event.stopPropagation(); return confirm(\'Permanently delete this doctor profile?\')">🗑</a></div>';
         echo '</div>';
+    }
+    $adminAboutControls = '';
+    if ($role === 'admin') {
+        $adminAboutControls = '<button class="btn btn-outline" type="button" id="doctorAboutEditBtn" style="width:auto; padding: 6px 12px; margin-left:auto;" onclick="toggleDoctorAboutEdit(true)">Edit About</button>';
     }
     echo '</div>
     <div class="modal-overlay" id="modal-doctor-details">
@@ -1122,8 +1279,18 @@ function render_doctors($role, $showToolbar = true) {
                 <div style="text-align: left; background: var(--surface2); padding: 20px; border-radius: 12px; border: 1px solid var(--border);">
                     <h4 style="margin-top: 0; margin-bottom: 12px; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
                         <span>🩺</span> About the Specialist
+                        ' . $adminAboutControls . '
                     </h4>
                     <p id="doctorDetailDesc" style="line-height: 1.7; color: var(--text-muted); white-space: pre-wrap; font-size: 0.95rem; margin: 0;"></p>
+                    <form id="doctorAboutForm" method="post" action="' . e(app_url('action.php')) . '" style="display:none; margin: 0;">
+                        <input type="hidden" name="action" value="update_doctor_description">
+                        <input type="hidden" name="doctor_id" id="doctorAboutId">
+                        <textarea class="form-control" name="doctor_description" id="doctorAboutTextarea" rows="8" required style="resize: vertical;"></textarea>
+                        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px;">
+                            <button class="btn btn-outline" type="button" style="width:auto" onclick="toggleDoctorAboutEdit(false)">Cancel</button>
+                            <button class="btn btn-primary" type="submit" style="width:auto">Save About</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
@@ -1144,7 +1311,22 @@ function render_doctors($role, $showToolbar = true) {
         document.getElementById("doctorDetailSpec").textContent = el.dataset.spec;
         document.getElementById("doctorDetailAvail").textContent = el.dataset.avail;
         document.getElementById("doctorDetailDesc").textContent = el.dataset.desc;
+        document.getElementById("doctorAboutId").value = el.dataset.id || "";
+        document.getElementById("doctorAboutTextarea").value = el.dataset.desc || "";
+        toggleDoctorAboutEdit(false);
         openModal("modal-doctor-details");
+    }
+    function toggleDoctorAboutEdit(isEditing) {
+        const desc = document.getElementById("doctorDetailDesc");
+        const form = document.getElementById("doctorAboutForm");
+        const editBtn = document.getElementById("doctorAboutEditBtn");
+        const textarea = document.getElementById("doctorAboutTextarea");
+        if (!desc || !form) return;
+
+        desc.style.display = isEditing ? "none" : "";
+        form.style.display = isEditing ? "" : "none";
+        if (editBtn) editBtn.style.display = isEditing ? "none" : "";
+        if (isEditing && textarea) textarea.focus();
     }
     document.getElementById("searchDoctorInput")?.addEventListener("input", function() {
         const q = this.value.toLowerCase();
@@ -1710,8 +1892,9 @@ function render_book() {
         if ($priceText === '') {
             $priceText = '0';
         }
+        $icon = get_service_icon($s['service_name']);
         echo '<button type="button" class="book-service-card js-select-service" data-service-name="' . e($s['service_name']) . '" data-service-price="' . e($priceText) . '" data-service-description="' . e($s['service_description']) . '">';
-        echo '<span class="service-icon">' . e($s['service_icon']) . '</span>';
+        echo '<span class="service-icon">' . e($icon) . '</span>';
         echo '<div class="service-name">' . e($s['service_name']) . '</div>';
         echo '<div class="service-price">RM ' . e($priceText) . '</div>';
         echo '<div class="service-desc">' . e($s['service_description']) . '</div>';
@@ -2247,7 +2430,7 @@ function render_staff() {
     global $conn;
     $staff = fetch_all_assoc(
         $conn,
-        "SELECT user_id, user_code, name, email, phone_number, user_status
+        "SELECT user_id, user_code, name, email, phone_number, gender, date_of_birth, blood_type, user_status
          FROM users
          WHERE role = ?
          ORDER BY user_code ASC",
@@ -2261,9 +2444,14 @@ function render_staff() {
     }
     foreach ($staff as $s) {
         $status = strtolower($s['user_status'] ?? 'inactive') === 'active' ? 'active' : 'inactive';
-        echo '<tr><td>' . e($s['user_code']) . '</td><td>' . e($s['name']) . '</td><td>Staff</td><td>' . e($s['email']) . '</td><td>' . e(format_phone_number($s['phone_number'] ?? '')) . '</td><td>' . badge($status) . '</td><td class="flex gap-8"><button type="button" class="btn btn-sm btn-outline" onclick="openEditStaffModal(this)" data-id="' . e($s['user_id']) . '" data-name="' . e($s['name']) . '" data-email="' . e($s['email']) . '" data-phone="' . e(format_phone_number($s['phone_number'] ?? '')) . '">✏️ Edit</button><a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'staff', 'id' => $s['user_id']])) . '" onclick="return confirm(\'Delete this staff member?\')">🗑 Delete</a></td></tr>';
+        $phone = format_phone_number($s['phone_number'] ?? '');
+        $dateOfBirth = !empty($s['date_of_birth']) ? format_date_display($s['date_of_birth']) : '-';
+        $detailsAttrs = ' data-id="' . e($s['user_code']) . '" data-name="' . e($s['name']) . '" data-email="' . e($s['email']) . '" data-phone="' . e($phone !== '' ? $phone : '-') . '" data-gender="' . e($s['gender'] ?: '-') . '" data-dob="' . e($dateOfBirth) . '" data-blood="' . e($s['blood_type'] ?: '-') . '" data-status="' . e($status) . '"';
+        $editAttrs = ' data-id="' . e($s['user_id']) . '" data-name="' . e($s['name']) . '" data-email="' . e($s['email']) . '" data-phone="' . e($phone) . '" data-gender="' . e($s['gender'] ?? '') . '" data-dob="' . e($s['date_of_birth'] ?? '') . '" data-blood="' . e($s['blood_type'] ?? '') . '"';
+        echo '<tr><td>' . e($s['user_code']) . '</td><td>' . e($s['name']) . '</td><td>Staff</td><td>' . e($s['email']) . '</td><td>' . e($phone) . '</td><td>' . badge($status) . '</td><td class="appt-actions-cell" style="padding: 12px 8px;"><div class="appt-action-menu"><button type="button" class="appt-menu-trigger" onclick="toggleStaffMenu(event, this)" aria-label="Staff actions">...</button><div class="appt-menu-list"><button type="button" class="appt-menu-item" onclick="showStaffDetails(this)"' . $detailsAttrs . '>View Details</button><button type="button" class="appt-menu-item" onclick="openEditStaffModal(this)"' . $editAttrs . '>Edit</button><a class="appt-menu-item danger" href="' . e(action_url('delete', ['type' => 'staff', 'id' => $s['user_id']])) . '" onclick="return confirm(\'Delete this staff member?\')">Delete</a></div></div></td></tr>';
     }
     echo '</tbody></table></div></div>';
+    echo '<div class="modal-overlay" id="modal-staff-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Staff Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-staff-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Staff ID</span><strong id="staffDetailId"></strong></div><div class="appointment-detail-list"><div><span>Name</span><strong id="staffDetailName"></strong></div><div><span>Role</span><strong>Staff</strong></div><div><span>Email</span><strong id="staffDetailEmail"></strong></div><div><span>Phone</span><strong id="staffDetailPhone"></strong></div><div><span>Status</span><strong id="staffDetailStatus"></strong></div></div></div></div></div>';
     echo '<script>
     document.getElementById("searchStaff")?.addEventListener("input", function () {
         const query = this.value.toLowerCase();
@@ -2271,13 +2459,73 @@ function render_staff() {
             row.style.display = row.innerText.toLowerCase().includes(query) ? "" : "none";
         });
     });
+    function formatStaffStatusLabel(status) {
+        return status ? status.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase()) : "-";
+    }
+    function ensureStaffDetailFields() {
+        if (document.getElementById("staffDetailGender")) return;
+        const statusRow = document.getElementById("staffDetailStatus")?.closest("div");
+        if (!statusRow) return;
+        ["Gender", "Date of Birth", "Blood Type"].forEach((label, index) => {
+            const row = document.createElement("div");
+            const id = ["staffDetailGender", "staffDetailDob", "staffDetailBlood"][index];
+            row.innerHTML = "<span>" + label + "</span><strong id=\"" + id + "\"></strong>";
+            statusRow.parentElement.insertBefore(row, statusRow);
+        });
+    }
+    function ensureStaffEditFields() {
+        if (document.getElementById("editStaffGender")) return;
+        const phoneGroup = document.getElementById("editStaffPhone")?.closest(".form-group");
+        if (!phoneGroup) return;
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = "<div class=\"form-group\"><label>Gender</label><select class=\"form-control\" name=\"gender\" id=\"editStaffGender\"><option value=\"\">Select gender</option><option value=\"Male\">Male</option><option value=\"Female\">Female</option></select></div><div class=\"form-group\"><label>Date of Birth</label><input class=\"form-control\" type=\"date\" name=\"date_of_birth\" id=\"editStaffDob\" max=\"' . date('Y-m-d') . '\" min=\"' . date('Y-m-d', strtotime('-120 years')) . '\"></div><div class=\"form-group\"><label>Blood Type</label><select class=\"form-control\" name=\"blood_type\" id=\"editStaffBlood\"><option value=\"\">Select blood type</option><option value=\"A+\">A+</option><option value=\"A-\">A-</option><option value=\"B+\">B+</option><option value=\"B-\">B-</option><option value=\"AB+\">AB+</option><option value=\"AB-\">AB-</option><option value=\"O+\">O+</option><option value=\"O-\">O-</option></select></div>";
+        phoneGroup.after(...wrapper.children);
+    }
+    function showStaffDetails(button) {
+        ensureStaffDetailFields();
+        document.getElementById("staffDetailId").textContent = button.dataset.id || "-";
+        document.getElementById("staffDetailName").textContent = button.dataset.name || "-";
+        document.getElementById("staffDetailEmail").textContent = button.dataset.email || "-";
+        document.getElementById("staffDetailPhone").textContent = button.dataset.phone || "-";
+        document.getElementById("staffDetailGender").textContent = button.dataset.gender || "-";
+        document.getElementById("staffDetailDob").textContent = button.dataset.dob || "-";
+        document.getElementById("staffDetailBlood").textContent = button.dataset.blood || "-";
+        const status = button.dataset.status || "";
+        document.getElementById("staffDetailStatus").innerHTML = "<span class=\"badge badge-" + status.replace(/_/g, "-") + "\">" + formatStaffStatusLabel(status) + "</span>";
+        closeStaffMenus();
+        openModal("modal-staff-details");
+    }
     function openEditStaffModal(button) {
+        ensureStaffEditFields();
         document.getElementById("editStaffId").value = button.dataset.id || "";
         document.getElementById("editStaffName").value = button.dataset.name || "";
         document.getElementById("editStaffEmail").value = button.dataset.email || "";
         document.getElementById("editStaffPhone").value = button.dataset.phone || "";
+        document.getElementById("editStaffGender").value = button.dataset.gender || "";
+        document.getElementById("editStaffDob").value = button.dataset.dob || "";
+        document.getElementById("editStaffBlood").value = button.dataset.blood || "";
+        closeStaffMenus();
         openModal("modal-edit-staff");
     }
+    function closeStaffMenus() {
+        document.querySelectorAll("#staffTableBody .appt-action-menu.open").forEach(menu => menu.classList.remove("open"));
+    }
+    function toggleStaffMenu(event, button) {
+        event.stopPropagation();
+        const menu = button.closest(".appt-action-menu");
+        const menuList = menu.querySelector(".appt-menu-list");
+        const wasOpen = menu.classList.contains("open");
+        closeStaffMenus();
+        menu.classList.toggle("open", !wasOpen);
+        if (!wasOpen && menuList) {
+            const rect = button.getBoundingClientRect();
+            const menuWidth = menuList.offsetWidth || 148;
+            const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth));
+            menuList.style.top = (rect.bottom + 6) + "px";
+            menuList.style.left = left + "px";
+        }
+    }
+    document.addEventListener("click", closeStaffMenus);
     </script>';
 }
 
@@ -2496,7 +2744,8 @@ function openAddDoctorModal() {
     });
     openModal('modal-add-doctor');
 }
-function openEditDoctorModal(btn) {
+function openEditDoctorModal(event, btn) {
+    event.stopPropagation();
     document.getElementById('doctorModalTitle').textContent = 'Edit Doctor';
     document.getElementById('editDoctorId').value = btn.dataset.id;
     document.getElementById('editDoctorName').value = btn.dataset.name;
@@ -2509,7 +2758,26 @@ function openEditDoctorModal(btn) {
     openModal('modal-add-doctor');
 }
 </script>
-<div class="modal-overlay" id="modal-add-service"><div class="modal"><div class="modal-header"><span class="modal-title">Add Service</span><button class="modal-close" onclick="closeModal('modal-add-service')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_service"><div class="modal-body"><div class="form-group"><label>Service Icon</label><div class="emoji-picker" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;"><input type="hidden" name="icon" id="serviceIconInput" value="🏥"><button type="button" class="btn btn-primary btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🏥')">🏥</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🦷')">🦷</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '👁️')">👁️</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '💉')">💉</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🩸')">🩸</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🫀')">🫀</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🩺')">🩺</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '💊')">💊</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🚑')">🚑</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🧪')">🧪</button></div></div><div class="form-group"><label>Service Name</label><input class="form-control" name="name" required></div><div class="form-group"><label>Fee (RM)</label><input class="form-control" type="number" step="0.01" name="fee" required></div><div class="form-group"><label>Description</label><textarea class="form-control" name="description" rows="3" required></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-service')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
+<div class="modal-overlay" id="modal-add-service"><div class="modal"><div class="modal-header"><span class="modal-title" id="serviceModalTitle">Add Service</span><button class="modal-close" onclick="closeModal('modal-add-service')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_service"><input type="hidden" name="id" id="editServiceId" value=""><div class="modal-body"><div class="form-group"><label>Service Name</label><input class="form-control" name="name" id="editServiceName" placeholder="e.g. Dental Cleaning" required></div><div class="form-group"><label>Fee (RM)</label><input class="form-control" type="number" step="0.01" name="fee" id="editServiceFee" required></div><div class="form-group"><label>Description</label><textarea class="form-control" name="description" id="editServiceDescription" rows="3" required></textarea></div><p class="text-muted" style="font-size:0.75rem; margin-top:8px">Note: The system will automatically assign an icon based on the service name.</p></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-service')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
+<script>
+function openAddServiceModal() {
+    document.getElementById('serviceModalTitle').textContent = 'Add Service';
+    document.getElementById('editServiceId').value = '';
+    document.getElementById('editServiceName').value = '';
+    document.getElementById('editServiceFee').value = '';
+    document.getElementById('editServiceDescription').value = '';
+    openModal('modal-add-service');
+}
+function openEditServiceModal(event, btn) {
+    event.stopPropagation();
+    document.getElementById('serviceModalTitle').textContent = 'Edit Service';
+    document.getElementById('editServiceId').value = btn.dataset.id || '';
+    document.getElementById('editServiceName').value = btn.dataset.name || '';
+    document.getElementById('editServiceFee').value = btn.dataset.fee || '';
+    document.getElementById('editServiceDescription').value = btn.dataset.description || btn.dataset.shortDesc || '';
+    openModal('modal-add-service');
+}
+</script>
 HTML;
     echo '<div class="modal-overlay" id="modal-edit-profile" data-static-modal="true"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Profile</span><button class="modal-close" onclick="closeModal(\'modal-edit-profile\')">✕</button></div><form method="post" action="' . e(app_url('action.php')) . '" enctype="multipart/form-data"><input type="hidden" name="action" value="save_profile"><div class="modal-body">';
     echo '<div class="profile-upload-area"><label class="profile-upload-avatar" for="profileImage">' . user_avatar_html($user, 'profile-avatar-lg') . '<span>Change</span></label><input class="profile-file-input" id="profileImage" type="file" name="profile_image" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted profile-upload-note">Upload a square JPG, PNG, or WEBP image. Maximum file size is 2MB.</p>';

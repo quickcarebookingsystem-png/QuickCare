@@ -11,6 +11,7 @@ app_header('QuickCare - Register');
       <h1>QuickCare</h1>
       <p>Create New Account</p>
     </div>
+    <?php render_notification('auth'); ?>
     <form method="post" action="<?php echo e(app_url('action.php')); ?>">
       <input type="hidden" name="action" value="register">
       <div class="form-group"><label>Full Name</label><input class="form-control" name="name" required></div>

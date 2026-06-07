@@ -10,6 +10,7 @@ app_header('QuickCare - Forgot Password');
       <h1>QuickCare</h1>
       <p>Reset Your Password</p>
     </div>
+    <?php render_notification('auth'); ?>
     <form method="post" action="<?php echo e(app_url('action.php')); ?>">
       <input type="hidden" name="action" value="forgot_password">
       <div class="form-group">

@@ -12,6 +12,7 @@ app_header('QuickCare - Login');
       <h1>QuickCare</h1>
       <p>Clinic Booking System</p>
     </div>
+    <?php render_notification('auth'); ?>
     <form method="post" action="<?php echo e(app_url('action.php')); ?>">
       <input type="hidden" name="action" value="login">
       <div class="form-group">
