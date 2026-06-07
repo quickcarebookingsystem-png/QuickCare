@@ -3068,9 +3068,10 @@ function render_time_slots() {
 
 function render_staff() {
     global $conn;
+    ensure_profile_image_column($conn);
     $staff = fetch_all_assoc(
         $conn,
-        "SELECT user_id, user_code, name, email, phone_number, gender, date_of_birth, blood_type, user_status
+        "SELECT user_id, user_code, name, email, phone_number, gender, date_of_birth, blood_type, user_status, profile_image
          FROM users
          WHERE role = ?
          ORDER BY user_code ASC",
@@ -3086,12 +3087,12 @@ function render_staff() {
         $status = strtolower($s['user_status'] ?? 'inactive') === 'active' ? 'active' : 'inactive';
         $phone = format_phone_number($s['phone_number'] ?? '');
         $dateOfBirth = !empty($s['date_of_birth']) ? format_date_display($s['date_of_birth']) : '-';
-        $detailsAttrs = ' data-id="' . e($s['user_code']) . '" data-name="' . e($s['name']) . '" data-email="' . e($s['email']) . '" data-phone="' . e($phone !== '' ? $phone : '-') . '" data-gender="' . e($s['gender'] ?: '-') . '" data-dob="' . e($dateOfBirth) . '" data-blood="' . e($s['blood_type'] ?: '-') . '" data-status="' . e($status) . '"';
+        $detailsAttrs = ' data-id="' . e($s['user_code']) . '" data-name="' . e($s['name']) . '" data-initials="' . e(name_avatar($s['name'] ?? 'Staff')) . '" data-image="' . e($s['profile_image'] ?? '') . '" data-email="' . e($s['email']) . '" data-phone="' . e($phone !== '' ? $phone : '-') . '" data-gender="' . e($s['gender'] ?: '-') . '" data-dob="' . e($dateOfBirth) . '" data-blood="' . e($s['blood_type'] ?: '-') . '" data-status="' . e($status) . '"';
         $editAttrs = ' data-id="' . e($s['user_id']) . '" data-name="' . e($s['name']) . '" data-email="' . e($s['email']) . '" data-phone="' . e($phone) . '" data-gender="' . e($s['gender'] ?? '') . '" data-dob="' . e($s['date_of_birth'] ?? '') . '" data-blood="' . e($s['blood_type'] ?? '') . '"';
         echo '<tr><td>' . e($s['user_code']) . '</td><td>' . e($s['name']) . '</td><td>Staff</td><td>' . e($s['email']) . '</td><td>' . e($phone) . '</td><td>' . badge($status) . '</td><td class="appt-actions-cell" style="padding: 12px 8px;"><div class="appt-action-menu"><button type="button" class="appt-menu-trigger" onclick="toggleStaffMenu(event, this)" aria-label="Staff actions">...</button><div class="appt-menu-list"><button type="button" class="appt-menu-item" onclick="showStaffDetails(this)"' . $detailsAttrs . '>View Details</button><button type="button" class="appt-menu-item" onclick="openEditStaffModal(this)"' . $editAttrs . '>Edit</button><a class="appt-menu-item danger" href="' . e(action_url('delete', ['type' => 'staff', 'id' => $s['user_id']])) . '" onclick="return confirm(\'Delete this staff member?\')">Delete</a></div></div></td></tr>';
     }
     echo '</tbody></table></div></div>';
-    echo '<div class="modal-overlay" id="modal-staff-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Staff Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-staff-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Staff ID</span><strong id="staffDetailId"></strong></div><div class="appointment-detail-list"><div><span>Name</span><strong id="staffDetailName"></strong></div><div><span>Role</span><strong>Staff</strong></div><div><span>Email</span><strong id="staffDetailEmail"></strong></div><div><span>Phone</span><strong id="staffDetailPhone"></strong></div><div><span>Status</span><strong id="staffDetailStatus"></strong></div></div></div></div></div>';
+    echo '<div class="modal-overlay" id="modal-staff-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Staff Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-staff-details\')">×</button></div><div class="modal-body"><div class="detail-avatar-wrap"><button type="button" class="detail-avatar avatar-preview-clickable" id="staffDetailAvatar" aria-label="Zoom staff avatar"></button></div><div class="appointment-detail-code"><span>Staff ID</span><strong id="staffDetailId"></strong></div><div class="appointment-detail-list"><div><span>Name</span><strong id="staffDetailName"></strong></div><div><span>Role</span><strong>Staff</strong></div><div><span>Email</span><strong id="staffDetailEmail"></strong></div><div><span>Phone</span><strong id="staffDetailPhone"></strong></div><div><span>Status</span><strong id="staffDetailStatus"></strong></div></div></div></div></div><div class="modal-overlay" id="modal-staff-avatar-preview"><div class="modal avatar-preview-modal"><div class="modal-header"><span class="modal-title" id="staffAvatarPreviewTitle">Avatar</span><button class="modal-close" onclick="closeModal(\'modal-staff-avatar-preview\')">&times;</button></div><div class="modal-body"><div class="avatar-preview-content" id="staffAvatarPreviewContent"></div></div></div></div>';
     echo '<script>
     document.getElementById("searchStaff")?.addEventListener("input", function () {
         const query = this.value.toLowerCase();
@@ -3121,8 +3122,42 @@ function render_staff() {
         wrapper.innerHTML = "<div class=\"form-group\"><label>Gender</label><select class=\"form-control\" name=\"gender\" id=\"editStaffGender\"><option value=\"\">Select gender</option><option value=\"Male\">Male</option><option value=\"Female\">Female</option></select></div><div class=\"form-group\"><label>Date of Birth</label><input class=\"form-control\" type=\"date\" name=\"date_of_birth\" id=\"editStaffDob\" max=\"' . date('Y-m-d') . '\" min=\"' . date('Y-m-d', strtotime('-120 years')) . '\"></div><div class=\"form-group\"><label>Blood Type</label><select class=\"form-control\" name=\"blood_type\" id=\"editStaffBlood\"><option value=\"\">Select blood type</option><option value=\"A+\">A+</option><option value=\"A-\">A-</option><option value=\"B+\">B+</option><option value=\"B-\">B-</option><option value=\"AB+\">AB+</option><option value=\"AB-\">AB-</option><option value=\"O+\">O+</option><option value=\"O-\">O-</option></select></div>";
         phoneGroup.after(...wrapper.children);
     }
+    function renderDetailAvatar(targetId, imageName, initials, name) {
+        const target = document.getElementById(targetId);
+        if (!target) return;
+        target.dataset.image = imageName || "";
+        target.dataset.initials = initials || "?";
+        target.dataset.title = name || "Avatar";
+        if (imageName) {
+            target.innerHTML = "<img src=\"' . e(app_url('uploads/avatars/')) . '" + encodeURIComponent(imageName) + "\" alt=\"\">";
+        } else {
+            target.textContent = initials || "?";
+        }
+    }
+    function openStaffAvatarPreview() {
+        const avatar = document.getElementById("staffDetailAvatar");
+        const content = document.getElementById("staffAvatarPreviewContent");
+        if (!avatar || !content) return;
+        document.getElementById("staffAvatarPreviewTitle").textContent = avatar.dataset.title || "Avatar";
+        content.innerHTML = "";
+        if (avatar.dataset.image) {
+            const img = document.createElement("img");
+            img.className = "avatar-preview-image";
+            img.src = "' . e(app_url('uploads/avatars/')) . '" + encodeURIComponent(avatar.dataset.image);
+            img.alt = avatar.dataset.title || "Avatar";
+            content.appendChild(img);
+        } else {
+            const fallback = document.createElement("div");
+            fallback.className = "avatar-preview-initials";
+            fallback.textContent = avatar.dataset.initials || "?";
+            content.appendChild(fallback);
+        }
+        openModal("modal-staff-avatar-preview");
+    }
+    document.getElementById("staffDetailAvatar")?.addEventListener("click", openStaffAvatarPreview);
     function showStaffDetails(button) {
         ensureStaffDetailFields();
+        renderDetailAvatar("staffDetailAvatar", button.dataset.image || "", button.dataset.initials || "", button.dataset.name || "Staff");
         document.getElementById("staffDetailId").textContent = button.dataset.id || "-";
         document.getElementById("staffDetailName").textContent = button.dataset.name || "-";
         document.getElementById("staffDetailEmail").textContent = button.dataset.email || "-";
@@ -3234,10 +3269,11 @@ function render_schedule() {
 
 function render_users() {
     global $conn;
+    ensure_profile_image_column($conn);
 
     $users = fetch_all_assoc(
         $conn,
-        "SELECT u.user_code, u.name, u.email, u.phone_number, u.gender, u.date_of_birth, u.blood_type, u.user_status,
+        "SELECT u.user_code, u.name, u.email, u.phone_number, u.gender, u.date_of_birth, u.blood_type, u.user_status, u.profile_image,
                 MAX(CASE
                     WHEN a.appointment_status = 'completed'
                          AND (
@@ -3250,7 +3286,7 @@ function render_users() {
          FROM users u
          LEFT JOIN appointments a ON a.name = u.name
          WHERE u.role = 'user'
-         GROUP BY u.user_id, u.user_code, u.name, u.email, u.phone_number, u.gender, u.date_of_birth, u.blood_type, u.user_status
+         GROUP BY u.user_id, u.user_code, u.name, u.email, u.phone_number, u.gender, u.date_of_birth, u.blood_type, u.user_status, u.profile_image
          ORDER BY u.user_id ASC"
     );
 
@@ -3289,7 +3325,7 @@ function render_users() {
         $lastVisit = !empty($u['last_visit']) ? date('d M Y, H:i', strtotime($u['last_visit'])) : '-';
         $phone = format_phone_number($u['phone_number'] ?? '');
         $dateOfBirth = !empty($u['date_of_birth']) ? format_date_display($u['date_of_birth']) : '-';
-        $detailsAttrs = ' data-id="' . e($u['user_code']) . '" data-name="' . e($u['name']) . '" data-email="' . e($u['email']) . '" data-phone="' . e($phone !== '' ? $phone : '-') . '" data-gender="' . e($u['gender'] ?: '-') . '" data-dob="' . e($dateOfBirth) . '" data-blood="' . e($u['blood_type'] ?: '-') . '" data-last-visit="' . e($lastVisit) . '" data-status="' . e($status) . '"';
+        $detailsAttrs = ' data-id="' . e($u['user_code']) . '" data-name="' . e($u['name']) . '" data-initials="' . e(name_avatar($u['name'] ?? 'User')) . '" data-image="' . e($u['profile_image'] ?? '') . '" data-email="' . e($u['email']) . '" data-phone="' . e($phone !== '' ? $phone : '-') . '" data-gender="' . e($u['gender'] ?: '-') . '" data-dob="' . e($dateOfBirth) . '" data-blood="' . e($u['blood_type'] ?: '-') . '" data-last-visit="' . e($lastVisit) . '" data-status="' . e($status) . '"';
         $searchText = implode(' ', [$u['user_code'], $u['name'], $u['email'], $phone, $u['gender'], $dateOfBirth, $u['blood_type'], $lastVisit, $status]);
         echo '<tr data-status="' . e($status) . '" data-search="' . e($searchText) . '" style="border-bottom: 1px solid var(--border);">
                 <td style="padding: 12px 8px;">' . e($u['user_code']) . '</td>
@@ -3304,7 +3340,7 @@ function render_users() {
                 </table>
             </div>
           </div>';
-    echo '<div class="modal-overlay" id="modal-user-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">User Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-user-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>User ID</span><strong id="userDetailId"></strong></div><div class="appointment-detail-list"><div><span>Name</span><strong id="userDetailName"></strong></div><div><span>Email</span><strong id="userDetailEmail"></strong></div><div><span>Phone</span><strong id="userDetailPhone"></strong></div><div><span>Gender</span><strong id="userDetailGender"></strong></div><div><span>Date of Birth</span><strong id="userDetailDob"></strong></div><div><span>Blood Type</span><strong id="userDetailBlood"></strong></div><div><span>Last Visit</span><strong id="userDetailLastVisit"></strong></div><div><span>Status</span><strong id="userDetailStatus"></strong></div></div></div></div></div>';
+    echo '<div class="modal-overlay" id="modal-user-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">User Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-user-details\')">×</button></div><div class="modal-body"><div class="detail-avatar-wrap"><button type="button" class="detail-avatar avatar-preview-clickable" id="userDetailAvatar" aria-label="Zoom user avatar"></button></div><div class="appointment-detail-code"><span>User ID</span><strong id="userDetailId"></strong></div><div class="appointment-detail-list"><div><span>Name</span><strong id="userDetailName"></strong></div><div><span>Email</span><strong id="userDetailEmail"></strong></div><div><span>Phone</span><strong id="userDetailPhone"></strong></div><div><span>Gender</span><strong id="userDetailGender"></strong></div><div><span>Date of Birth</span><strong id="userDetailDob"></strong></div><div><span>Blood Type</span><strong id="userDetailBlood"></strong></div><div><span>Last Visit</span><strong id="userDetailLastVisit"></strong></div><div><span>Status</span><strong id="userDetailStatus"></strong></div></div></div></div></div><div class="modal-overlay" id="modal-user-avatar-preview"><div class="modal avatar-preview-modal"><div class="modal-header"><span class="modal-title" id="userAvatarPreviewTitle">Avatar</span><button class="modal-close" onclick="closeModal(\'modal-user-avatar-preview\')">&times;</button></div><div class="modal-body"><div class="avatar-preview-content" id="userAvatarPreviewContent"></div></div></div></div>';
     
     // Add search filter script
     echo '
@@ -3334,7 +3370,41 @@ function render_users() {
     function formatUserStatusLabel(status) {
         return status ? status.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase()) : "-";
     }
+    function renderUserDetailAvatar(imageName, initials, name) {
+        const target = document.getElementById("userDetailAvatar");
+        if (!target) return;
+        target.dataset.image = imageName || "";
+        target.dataset.initials = initials || "?";
+        target.dataset.title = name || "Avatar";
+        if (imageName) {
+            target.innerHTML = "<img src=\"' . e(app_url('uploads/avatars/')) . '" + encodeURIComponent(imageName) + "\" alt=\"\">";
+        } else {
+            target.textContent = initials || "?";
+        }
+    }
+    function openUserAvatarPreview() {
+        const avatar = document.getElementById("userDetailAvatar");
+        const content = document.getElementById("userAvatarPreviewContent");
+        if (!avatar || !content) return;
+        document.getElementById("userAvatarPreviewTitle").textContent = avatar.dataset.title || "Avatar";
+        content.innerHTML = "";
+        if (avatar.dataset.image) {
+            const img = document.createElement("img");
+            img.className = "avatar-preview-image";
+            img.src = "' . e(app_url('uploads/avatars/')) . '" + encodeURIComponent(avatar.dataset.image);
+            img.alt = avatar.dataset.title || "Avatar";
+            content.appendChild(img);
+        } else {
+            const fallback = document.createElement("div");
+            fallback.className = "avatar-preview-initials";
+            fallback.textContent = avatar.dataset.initials || "?";
+            content.appendChild(fallback);
+        }
+        openModal("modal-user-avatar-preview");
+    }
+    document.getElementById("userDetailAvatar")?.addEventListener("click", openUserAvatarPreview);
     function showUserDetails(button) {
+        renderUserDetailAvatar(button.dataset.image || "", button.dataset.initials || "", button.dataset.name || "User");
         document.getElementById("userDetailId").textContent = button.dataset.id || "-";
         document.getElementById("userDetailName").textContent = button.dataset.name || "-";
         document.getElementById("userDetailEmail").textContent = button.dataset.email || "-";
