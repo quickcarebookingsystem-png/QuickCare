@@ -867,7 +867,8 @@ function app_start($role, $page, $title = null) {
     $title = $title ?: ($PAGE_TITLES[$page] ?? 'Dashboard');
     echo '<body><div id="app" class="view active">';
     render_sidebar($conn, $role, $page);
-    echo '<div class="main-content"><div class="topbar"><span class="topbar-title">' . e($title) . '</span><div class="topbar-actions">';
+    echo '<div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>';
+    echo '<div class="main-content"><div class="topbar"><button class="sidebar-toggle" type="button" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false"><span></span><span></span><span></span></button><span class="topbar-title">' . e($title) . '</span><div class="topbar-actions">';
     echo '<span class="text-muted text-sm">' . date('l, F j, Y') . '</span></div></div><div class="page-content">';
     if (!empty($_SESSION['QuickCare_message'])) {
         $messageType = $_SESSION['QuickCare_message_type'] ?? 'success';
