@@ -828,11 +828,12 @@ function appointment_time_has_passed($date, $time) {
 }
 
 function app_header($title) {
+    $styleVersion = @filemtime(__DIR__ . '/style.css') ?: time();
     echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">';
     echo '<title>' . e($title) . '</title>';
     echo '<base href="' . e(rtrim(app_base_url(), '/') . '/') . '">';
     echo '<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">';
-    echo '<link rel="stylesheet" href="style.css"></head>';
+    echo '<link rel="stylesheet" href="style.css?v=' . e($styleVersion) . '"></head>';
     if (isset($_SESSION['message'])) {
         echo "<script>alert('" . $_SESSION['message'] . "');</script>";
         unset($_SESSION['message']);
@@ -879,6 +880,7 @@ function app_start($role, $page, $title = null) {
 }
 
 function app_end() {
+    $scriptVersion = @filemtime(__DIR__ . '/ui.js') ?: time();
     render_modals();
     $customerServiceButton = '';
     if (($_SESSION['QuickCare_role'] ?? '') === 'user') {
@@ -914,7 +916,7 @@ function app_end() {
     });
     </script>
 
-    <script src="ui.js"></script>
+    <script src="ui.js?v=' . e($scriptVersion) . '"></script>
     </body></html>';
 }
 

@@ -37,13 +37,15 @@ document.querySelectorAll('[data-phone-format]').forEach(input => {
   });
 });
 
-document.addEventListener('DOMContentLoaded', () => {
+function initSidebarToggle() {
   const app = document.getElementById('app');
   const sidebar = document.getElementById('sidebar');
   const toggle = document.querySelector('.sidebar-toggle');
   const backdrop = document.getElementById('sidebarBackdrop');
 
   if (!app || !sidebar || !toggle || !backdrop) return;
+  if (toggle.dataset.sidebarReady === 'true') return;
+  toggle.dataset.sidebarReady = 'true';
 
   const isMobileSidebar = () => window.matchMedia('(max-width: 900px)').matches;
 
@@ -86,4 +88,10 @@ document.addEventListener('DOMContentLoaded', () => {
       setSidebarOpen(false);
     }
   });
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initSidebarToggle);
+} else {
+  initSidebarToggle();
+}
