@@ -587,13 +587,47 @@ if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $notes = trim($_POST['notes'] ?? '');
 
     if (empty($selectedServices)) {
-        $_SESSION['QuickCare_message'] = "Please select at least one service.";
+        $_SESSION['QuickCare_message'] = "Please select a service.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    }
+
+    if (count($selectedServices) > 1) {
+        $_SESSION['QuickCare_message'] = "Please select only one service.";
+        $_SESSION['QuickCare_message_type'] = "error";
         redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
     }
 
     $dateObj = DateTime::createFromFormat('Y-m-d', $date);
     if ($doctor === '' || !$dateObj || $time === '') {
         $_SESSION['QuickCare_message'] = "Please choose a doctor, date and time.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    }
+
+    $selectedService = $selectedServices[0];
+    ensure_doctor_services_table($conn);
+    $stmt = $conn->prepare("SELECT service_id FROM services WHERE service_name = ? LIMIT 1");
+    $stmt->bind_param("s", $selectedService);
+    $stmt->execute();
+    $serviceRow = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    $serviceId = (int)($serviceRow['service_id'] ?? 0);
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) AS total
+        FROM doctors d
+        INNER JOIN doctor_services ds ON ds.doctor_id = d.doctor_id
+        WHERE d.doctor_name = ?
+          AND ds.service_id = ?
+    ");
+    $stmt->bind_param("si", $doctor, $serviceId);
+    $stmt->execute();
+    $doctorServiceRow = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if ($serviceId <= 0 || (int)($doctorServiceRow['total'] ?? 0) === 0) {
+        $_SESSION['QuickCare_message'] = "Please choose a doctor who is available for the selected service.";
         $_SESSION['QuickCare_message_type'] = "error";
         redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
     }
@@ -607,6 +641,7 @@ if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $availableDay = $dateObj->format('D');
     $appointmentTime = strlen($time) === 5 ? $time . ':00' : $time;
+    ensure_doctor_schedule_break_columns($conn);
     $stmt = $conn->prepare("
         SELECT COUNT(*) AS total
         FROM doctor_schedule ds
@@ -615,14 +650,25 @@ if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
           AND ds.available_day = ?
           AND ds.start_time <= ?
           AND ds.end_time > ?
+          AND (
+              ds.break_start_time IS NULL
+              OR ds.break_end_time IS NULL
+              OR NOT (ds.break_start_time <= ? AND ds.break_end_time > ?)
+          )
     ");
-    $stmt->bind_param("ssss", $doctor, $availableDay, $appointmentTime, $appointmentTime);
+    $stmt->bind_param("ssssss", $doctor, $availableDay, $appointmentTime, $appointmentTime, $appointmentTime, $appointmentTime);
     $stmt->execute();
     $scheduleRow = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
     if ((int)($scheduleRow['total'] ?? 0) === 0) {
         $_SESSION['QuickCare_message'] = "Selected time is not available for this doctor.";
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    }
+
+    if (doctor_time_slot_is_locked($conn, $doctor, $date, $appointmentTime)) {
+        $_SESSION['QuickCare_message'] = "Selected time slot is locked because the doctor is unavailable.";
+        $_SESSION['QuickCare_message_type'] = "error";
         redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
     }
 
@@ -748,7 +794,7 @@ if (in_array($action, ['cancel_appointment', 'approve', 'reject', 'update_status
                 redirect_to($back);
             }
 
-            $stmt = $conn->prepare("SELECT appointment_status FROM appointments WHERE appointment_code = ?");
+            $stmt = $conn->prepare("SELECT appointment_status, appointment_date, appointment_time FROM appointments WHERE appointment_code = ?");
             $stmt->bind_param("s", $appointmentCode);
             $stmt->execute();
             $appointment = $stmt->get_result()->fetch_assoc();
@@ -756,6 +802,13 @@ if (in_array($action, ['cancel_appointment', 'approve', 'reject', 'update_status
 
             if (!$appointment || !in_array($appointment['appointment_status'] ?? '', ['confirm', 'confirmed'], true)) {
                 $_SESSION['QuickCare_message'] = 'Only confirmed appointments can be completed.';
+                $_SESSION['QuickCare_message_type'] = 'error';
+                $back = $_SERVER['HTTP_REFERER'] ?? page_url('dashboard');
+                redirect_to($back);
+            }
+
+            if (!appointment_time_has_passed($appointment['appointment_date'] ?? '', $appointment['appointment_time'] ?? '')) {
+                $_SESSION['QuickCare_message'] = 'This appointment cannot be completed before its scheduled time.';
                 $_SESSION['QuickCare_message_type'] = 'error';
                 $back = $_SERVER['HTTP_REFERER'] ?? page_url('dashboard');
                 redirect_to($back);
@@ -817,7 +870,8 @@ if ($action === 'save_service' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ensure_service_overview_column($conn);
     $id = (int)($_POST['id'] ?? 0);
     $name = trim($_POST['name'] ?? '');
-    $fee = (float) ($_POST['fee'] ?? 0);
+    $feeInput = preg_replace('/\D+/', '', (string)($_POST['fee'] ?? ''));
+    $fee = $feeInput === '' ? 0 : ((int)$feeInput / 100);
     $description = trim($_POST['description'] ?? '');
 
     if ($name !== '') {
@@ -825,7 +879,7 @@ if ($action === 'save_service' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $conn->prepare("UPDATE services SET service_name = ?, service_price = ?, service_description = ? WHERE service_id = ?");
             $stmt->bind_param("sdsi", $name, $fee, $description, $id);
         } else {
-            $overview = service_default_overview($name, $description);
+            $overview = service_default_overview($name, '');
             $stmt = $conn->prepare("INSERT INTO services (service_name, service_price, service_description, service_overview) VALUES (?, ?, ?, ?)");
             $stmt->bind_param("sdss", $name, $fee, $description, $overview);
         }
@@ -1261,14 +1315,199 @@ if ($action === 'reject_refund') {
     exit;
 }
 
+if ($action === 'save_time_lock' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+        $_SESSION['QuickCare_message'] = 'Only admins can manage time slots.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to(app_url('login.php'));
+    }
+
+    ensure_doctor_time_locks_table($conn);
+    $doctorId = (int)($_POST['doctor_id'] ?? 0);
+    $lockDate = trim($_POST['lock_date'] ?? '');
+    $allDay = isset($_POST['all_day']);
+    $startTime = trim($_POST['start_time'] ?? '');
+    $endTime = trim($_POST['end_time'] ?? '');
+    $reason = trim($_POST['reason'] ?? '');
+    $back = $_SERVER['HTTP_REFERER'] ?? page_url('availability', 'admin');
+
+    $dateObj = DateTime::createFromFormat('Y-m-d', $lockDate);
+    $today = new DateTime('today');
+    if ($doctorId <= 0 || !$dateObj || $dateObj < $today) {
+        $_SESSION['QuickCare_message'] = 'Please choose a doctor and today or a future date.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
+
+    if ($allDay) {
+        $startTime = null;
+        $endTime = null;
+    } else {
+        if (!preg_match('/^\d{2}:(00|30)$/', $startTime) || !preg_match('/^\d{2}:(00|30)$/', $endTime) || strtotime($endTime) <= strtotime($startTime)) {
+            $_SESSION['QuickCare_message'] = 'Please choose a valid time using 00 or 30 minutes, and make sure end time is later than start time.';
+            $_SESSION['QuickCare_message_type'] = 'error';
+            redirect_to($back);
+        }
+        $startTime .= ':00';
+        $endTime .= ':00';
+    }
+
+    $scheduleError = validate_doctor_time_lock_schedule($conn, $doctorId, $lockDate, $startTime, $endTime);
+    if ($scheduleError !== '') {
+        $_SESSION['QuickCare_message'] = $scheduleError;
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
+
+    if ($allDay) {
+        $stmt = $conn->prepare("
+            SELECT COUNT(*) AS total
+            FROM doctor_time_locks
+            WHERE doctor_id = ?
+              AND lock_date = ?
+        ");
+        $stmt->bind_param("is", $doctorId, $lockDate);
+    } else {
+        $stmt = $conn->prepare("
+            SELECT COUNT(*) AS total
+            FROM doctor_time_locks
+            WHERE doctor_id = ?
+              AND lock_date = ?
+              AND (
+                  start_time IS NULL
+                  OR end_time IS NULL
+                  OR (start_time < ? AND end_time > ?)
+              )
+        ");
+        $stmt->bind_param("isss", $doctorId, $lockDate, $endTime, $startTime);
+    }
+    $stmt->execute();
+    $overlapRow = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if ((int)($overlapRow['total'] ?? 0) > 0) {
+        $_SESSION['QuickCare_message'] = $allDay
+            ? 'This doctor already has a locked slot on this date.'
+            : 'This time slot overlaps with an existing locked slot.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
+
+    $stmt = $conn->prepare("INSERT INTO doctor_time_locks (doctor_id, lock_date, start_time, end_time, reason) VALUES (?, ?, ?, ?, ?)");
+    $stmt->bind_param("issss", $doctorId, $lockDate, $startTime, $endTime, $reason);
+    $stmt->execute();
+    $stmt->close();
+}
+
+if ($action === 'delete_time_lock') {
+    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+        $_SESSION['QuickCare_message'] = 'Only admins can manage time slots.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to(app_url('login.php'));
+    }
+
+    ensure_doctor_time_locks_table($conn);
+    $id = (int)($_GET['id'] ?? 0);
+    if ($id > 0) {
+        $stmt = $conn->prepare("DELETE FROM doctor_time_locks WHERE lock_id = ?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
 if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = (int)($_POST['id'] ?? 0);
     $name = trim($_POST['name'] ?? '');
     $specialization = trim($_POST['specialization'] ?? '');
     $available_days = $_POST['available_days'] ?? [];
+    $providedServices = $_POST['service_ids'] ?? [];
+    $scheduleStart = trim((string)($_POST['schedule_start'] ?? '09:00'));
+    $scheduleEnd = trim((string)($_POST['schedule_end'] ?? '18:00'));
+    $breakStart = trim((string)($_POST['break_start'] ?? '13:00'));
+    $breakEnd = trim((string)($_POST['break_end'] ?? '14:00'));
+    $validScheduleDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    $serviceIds = [];
+    if (is_array($providedServices)) {
+        foreach ($providedServices as $serviceId) {
+            $serviceId = (int)$serviceId;
+            if ($serviceId > 0) {
+                $serviceIds[] = $serviceId;
+            }
+        }
+    }
+    $serviceIds = array_values(array_unique($serviceIds));
+    $doctorSchedules = [];
     $doctorImage = null;
 
     if ($name !== '') {
+        if (empty($serviceIds)) {
+            $_SESSION['QuickCare_message'] = 'Please select at least one service this doctor can provide.';
+            $_SESSION['QuickCare_message_type'] = 'error';
+            redirect_to($_SERVER['HTTP_REFERER'] ?? page_url('doctors', 'admin'));
+        }
+
+        ensure_doctor_services_table($conn);
+        ensure_doctor_schedule_break_columns($conn);
+        if (
+            !preg_match('/^\d{2}:(00|30)$/', $scheduleStart)
+            || !preg_match('/^\d{2}:(00|30)$/', $scheduleEnd)
+            || !preg_match('/^\d{2}:(00|30)$/', $breakStart)
+            || !preg_match('/^\d{2}:(00|30)$/', $breakEnd)
+        ) {
+            $_SESSION['QuickCare_message'] = 'Doctor schedule time must use 00 or 30 minutes only.';
+            $_SESSION['QuickCare_message_type'] = 'error';
+            redirect_to($_SERVER['HTTP_REFERER'] ?? page_url('doctors', 'admin'));
+        }
+
+        foreach ($available_days as $day) {
+            if (!in_array($day, $validScheduleDays, true)) {
+                continue;
+            }
+
+            $startTime = $scheduleStart;
+            $endTime = $scheduleEnd;
+            $breakStartTime = $breakStart;
+            $breakEndTime = $breakEnd;
+
+            if (!preg_match('/^\d{2}:(00|30)$/', $startTime)) {
+                $startTime = '09:00';
+            }
+            if (!preg_match('/^\d{2}:(00|30)$/', $endTime)) {
+                $endTime = '18:00';
+            }
+            if (!preg_match('/^\d{2}:(00|30)$/', $breakStartTime)) {
+                $breakStartTime = '13:00';
+            }
+            if (!preg_match('/^\d{2}:(00|30)$/', $breakEndTime)) {
+                $breakEndTime = '14:00';
+            }
+
+            $startTimestamp = strtotime($startTime);
+            $endTimestamp = strtotime($endTime);
+            if ($startTimestamp === false || $endTimestamp === false || $endTimestamp <= $startTimestamp) {
+                $_SESSION['QuickCare_message'] = 'Doctor schedule end time must be later than start time.';
+                $_SESSION['QuickCare_message_type'] = 'error';
+                redirect_to($_SERVER['HTTP_REFERER'] ?? page_url('doctors', 'admin'));
+            }
+
+            $breakStartTimestamp = strtotime($breakStartTime);
+            $breakEndTimestamp = strtotime($breakEndTime);
+            if (
+                $breakStartTimestamp === false
+                || $breakEndTimestamp === false
+                || $breakEndTimestamp <= $breakStartTimestamp
+                || $breakStartTimestamp < $startTimestamp
+                || $breakEndTimestamp > $endTimestamp
+            ) {
+                $_SESSION['QuickCare_message'] = 'Break time must be inside available time and end later than start.';
+                $_SESSION['QuickCare_message_type'] = 'error';
+                redirect_to($_SERVER['HTTP_REFERER'] ?? page_url('doctors', 'admin'));
+            }
+
+            $doctorSchedules[] = [$day, $startTime . ':00', $endTime . ':00', $breakStartTime . ':00', $breakEndTime . ':00'];
+        }
+
         ensure_doctor_image_column($conn);
 
         if (!empty($_FILES['doctor_image']['name'])) {
@@ -1328,10 +1567,24 @@ if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->close();
         }
 
-        if ($doctor_id > 0 && !empty($available_days)) {
-            $stmtDays = $conn->prepare("INSERT INTO doctor_schedule (doctor_id, available_day, start_time, end_time) VALUES (?, ?, '09:00:00', '17:00:00')");
-            foreach ($available_days as $day) {
-                $stmtDays->bind_param("is", $doctor_id, $day);
+        $stmtClearServices = $conn->prepare("DELETE FROM doctor_services WHERE doctor_id = ?");
+        $stmtClearServices->bind_param("i", $doctor_id);
+        $stmtClearServices->execute();
+        $stmtClearServices->close();
+
+        if (!empty($serviceIds)) {
+            $stmtDoctorService = $conn->prepare("INSERT INTO doctor_services (doctor_id, service_id) VALUES (?, ?)");
+            foreach ($serviceIds as $serviceId) {
+                $stmtDoctorService->bind_param("ii", $doctor_id, $serviceId);
+                $stmtDoctorService->execute();
+            }
+            $stmtDoctorService->close();
+        }
+
+        if ($doctor_id > 0 && !empty($doctorSchedules)) {
+            $stmtDays = $conn->prepare("INSERT INTO doctor_schedule (doctor_id, available_day, start_time, end_time, break_start_time, break_end_time) VALUES (?, ?, ?, ?, ?, ?)");
+            foreach ($doctorSchedules as [$day, $startTime, $endTime, $breakStartTime, $breakEndTime]) {
+                $stmtDays->bind_param("isssss", $doctor_id, $day, $startTime, $endTime, $breakStartTime, $breakEndTime);
                 $stmtDays->execute();
             }
             $stmtDays->close();
@@ -1391,7 +1644,14 @@ if ($action === 'delete') {
             $stmtSched->execute();
             $stmtSched->close();
 
-            // 4. Delete the doctor
+            // 4. Delete service mappings
+            ensure_doctor_services_table($conn);
+            $stmtServices = $conn->prepare("DELETE FROM doctor_services WHERE doctor_id = ?");
+            $stmtServices->bind_param("i", $id);
+            $stmtServices->execute();
+            $stmtServices->close();
+
+            // 5. Delete the doctor
             $stmtDoc = $conn->prepare("DELETE FROM doctors WHERE doctor_id = ?");
             $stmtDoc->bind_param("i", $id);
             $stmtDoc->execute();
@@ -1448,6 +1708,8 @@ $message = match ($action) {
     'request_refund' => 'Refund request submitted. Please wait for admin approval.',
     'refund_payment' => 'Payment has been refunded. Email sent to patient.',
     'reject_refund' => 'Refund request has been rejected. Email sent to patient.',
+    'save_time_lock' => 'Time slot locked successfully.',
+    'delete_time_lock' => 'Time slot unlocked successfully.',
     default => 'Action completed.',
 };
 

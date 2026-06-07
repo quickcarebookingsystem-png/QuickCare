@@ -62,21 +62,21 @@ app_header('QuickCare - Contact Us');
             <span style="font-size: 1.5rem;">🏢</span>
             <div>
               <h4 style="margin: 0 0 4px 0; color: var(--primary);">Office</h4>
-              <p style="margin: 0; line-height: 1.5;">07-238 7675 / 07-238 7677<br><small class="text-muted">Mon-Fri | 8am-5pm</small></p>
+              <p style="margin: 0; line-height: 1.5;">07-238 7675 / 07-238 7677<br><small class="text-muted">Mon-Sat | 9am-6pm</small></p>
             </div>
           </div>
           <div style="display: flex; align-items: flex-start; gap: 16px;">
             <span style="font-size: 1.5rem;">💬</span>
             <div>
               <h4 style="margin: 0 0 4px 0; color: var(--primary);">WhatsApp</h4>
-              <p style="margin: 0; line-height: 1.5;">016-4165175</p>
+              <p style="margin: 0; line-height: 1.5;">011-1080 7180</p>
             </div>
           </div>
           <div style="display: flex; align-items: flex-start; gap: 16px;">
             <span style="font-size: 1.5rem;">🎧</span>
             <div>
               <h4 style="margin: 0 0 4px 0; color: var(--primary);">Customer Service</h4>
-              <p style="margin: 0; line-height: 1.5;">011-15171015<br><small class="text-muted">Mon-Fri | 8am-5pm</small></p>
+              <p style="margin: 0; line-height: 1.5;">011-1080 7180<br><small class="text-muted">Mon-Sat | 9am-6pm</small></p>
             </div>
           </div>
           <div style="display: flex; align-items: flex-start; gap: 16px;">
@@ -109,6 +109,23 @@ app_header('QuickCare - Contact Us');
       </div>
     </div>
   </footer>
+
+  <a href="#" class="back-to-top" title="Back to top">↑</a>
+  <a class="landing-whatsapp-btn" href="https://wa.me/601110807180" target="_blank" rel="noopener" aria-label="Chat with customer service on WhatsApp" title="Customer Service WhatsApp" draggable="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 3a8 8 0 0 0-8 8v3a3 3 0 0 0 3 3h1v-6H6a6 6 0 0 1 12 0h-2v6h1a3 3 0 0 0 3-3v-3a8 8 0 0 0-8-8Z"/>
+      <path d="M9 18h2.2c.3.9 1.1 1.5 2.1 1.5H15a1 1 0 1 0 0-2h-1.7a.5.5 0 0 1-.5-.5v-.2H9V18Z"/>
+    </svg>
+  </a>
 </div>
+<script>
+const backToTop = document.querySelector('.back-to-top');
+function updateBackToTop() {
+    if (!backToTop) return;
+    backToTop.classList.toggle('visible', window.scrollY > 220);
+}
+window.addEventListener('scroll', updateBackToTop, { passive: true });
+updateBackToTop();
+</script>
 </body>
 </html>

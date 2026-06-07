@@ -1055,6 +1055,20 @@ tbody td { padding: 12px 16px; color: var(--text); }
   flex-shrink: 0;
   overflow: hidden;
 }
+.profile-avatar-lg img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.avatar-preview-clickable,
+#doctorDetailAvatar {
+  cursor: zoom-in;
+}
+.avatar-preview-clickable:focus-visible,
+#doctorDetailAvatar:focus-visible {
+  outline: 3px solid rgba(123, 59, 88, 0.28);
+  outline-offset: 4px;
+}
 .profile-upload-area {
   display: grid;
   justify-items: center;
@@ -1202,6 +1216,38 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 .filter-select:focus { border-color: var(--primary); }
 
+.time-lock-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.time-lock-all-day {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 14px;
+  font-size: 0.9rem;
+  color: var(--text-main);
+}
+
+.time-lock-range {
+  margin-bottom: 4px;
+}
+
+.time-lock-help {
+  color: var(--text-muted);
+  line-height: 1.6;
+  font-size: 0.92rem;
+}
+
+@media (max-width: 860px) {
+  .time-lock-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ====== MODAL ====== */
 .modal-overlay {
   position: fixed;
@@ -1245,6 +1291,36 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .modal-close:hover { background: var(--border); }
 .modal-body { padding: 0 24px 24px; }
 .modal-footer { padding: 0 24px 24px; display: flex; gap: 12px; justify-content: flex-end; }
+.avatar-preview-modal {
+  width: min(420px, 94vw);
+}
+.avatar-preview-content {
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 8px;
+}
+.avatar-preview-image,
+.avatar-preview-initials {
+  width: min(300px, 70vw);
+  height: min(300px, 70vw);
+  border-radius: 50%;
+  box-shadow: 0 18px 44px rgba(0,0,0,0.18);
+}
+.avatar-preview-image {
+  display: block;
+  object-fit: cover;
+}
+.avatar-preview-initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--accent), var(--primary));
+  color: var(--primary-dark);
+  font-size: 5rem;
+  font-weight: 600;
+}
 
 .dashboard-view-btn {
   min-width: 64px;
@@ -1346,6 +1422,8 @@ tbody td { padding: 12px 16px; color: var(--text); }
 
 .appointment-detail-actions {
   display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
   justify-content: flex-end;
   padding-top: 24px;
 }
@@ -1506,7 +1584,7 @@ tbody td { padding: 12px 16px; color: var(--text); }
 /* Toast */
 .toast {
   position: fixed;
-  bottom: 24px; right: 24px;
+  top: 24px; right: 24px;
   background: var(--text);
   color: white;
   padding: 14px 20px;
@@ -1514,7 +1592,7 @@ tbody td { padding: 12px 16px; color: var(--text); }
   font-size: 0.88rem;
   box-shadow: var(--shadow-md);
   z-index: 9999;
-  transform: translateY(100px);
+  transform: translateY(-100px);
   opacity: 0;
   transition: all 0.3s;
   max-width: 320px;
@@ -1819,6 +1897,73 @@ tbody td { padding: 12px 16px; color: var(--text); }
   justify-content: center;
   padding: 10px 18px;
   font-size: 0.9rem;
+}
+
+.landing-whatsapp-btn {
+  position: fixed;
+  right: 32px;
+  bottom: 92px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary);
+  color: white;
+  border: 1px solid rgba(124, 51, 73, 0.24);
+  box-shadow: var(--shadow-md);
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-decoration: none;
+  letter-spacing: 0;
+  z-index: 101;
+  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.landing-whatsapp-btn:hover {
+  background: var(--primary-dark);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+
+.landing-whatsapp-btn svg {
+  width: 25px;
+  height: 25px;
+  display: block;
+  fill: currentColor;
+}
+
+.portal-customer-service-btn {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary);
+  color: white;
+  border: 1px solid rgba(124, 51, 73, 0.24);
+  box-shadow: var(--shadow-md);
+  text-decoration: none;
+  z-index: 110;
+  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.portal-customer-service-btn:hover {
+  background: var(--primary-dark);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+
+.portal-customer-service-btn svg {
+  width: 25px;
+  height: 25px;
+  display: block;
+  fill: currentColor;
 }
 
 .landing-hero {

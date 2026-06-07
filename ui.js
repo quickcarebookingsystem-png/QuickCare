@@ -15,8 +15,7 @@ function selectPM(el) {
 
 document.querySelectorAll('.modal-overlay').forEach(el => {
   el.addEventListener('click', e => {
-    if (el.dataset.staticModal === 'true') return;
-    if (e.target === el) el.classList.remove('active');
+    if (e.target === el) return;
   });
 });
 

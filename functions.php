@@ -20,7 +20,7 @@ $PAGE_URLS = [
     'admin' => [
         'dashboard' => 'admin/admin_dashboard.php', 'profile' => 'my_profile.php', 'staff' => 'staff/manage_staff.php',
         'doctors' => 'admin/manage_doctors.php', 'services' => 'admin/manage_services.php', 'appointments' => 'admin/all_appointments.php',
-        'payment' => 'admin/manage_payments.php', 'reports' => 'admin/reports.php',
+        'availability' => 'admin/manage_time_slots.php', 'payment' => 'admin/manage_payments.php', 'reports' => 'admin/reports.php',
     ],
 ];
 
@@ -43,6 +43,7 @@ $NAVS = [
         ['section' => 'Account', 'items' => [['id' => 'dashboard', 'icon' => '📊', 'label' => 'Dashboard'], ['id' => 'profile', 'icon' => '👤', 'label' => 'My Profile']]],
         ['section' => 'Management', 'items' => [['id' => 'staff', 'icon' => '👥', 'label' => 'Manage Staff'], ['id' => 'doctors', 'icon' => '👨‍⚕️', 'label' => 'Manage Doctors'], ['id' => 'services', 'icon' => '🏥', 'label' => 'Manage Services']]],
         ['section' => 'Appointments', 'items' => [['id' => 'appointments', 'icon' => '📋', 'label' => 'All Appointments']]],
+        ['section' => 'Availability', 'items' => [['id' => 'availability', 'icon' => '&#128274;', 'label' => 'Manage Time Slots']]],
         ['section' => 'Payments & Reports', 'items' => [['id' => 'payment', 'icon' => '💳', 'label' => 'Manage Payments'], ['id' => 'reports', 'icon' => '📈', 'label' => 'Reports']]],
     ],
 ];
@@ -51,7 +52,7 @@ $PAGE_TITLES = [
     'dashboard' => 'Dashboard', 'profile' => 'My Profile', 'services' => 'Clinic Services',
     'doctors' => 'Doctor List', 'book' => 'Book Appointment', 'appointments' => 'Appointments',
     'payment' => 'Payment', 'payment_history' => 'Payment History', 'reports' => 'Reports', 
-    'staff' => 'Manage Staff', 'schedule' => 'Daily Schedule', 'users' => 'User List',
+    'staff' => 'Manage Staff', 'schedule' => 'Daily Schedule', 'users' => 'User List', 'availability' => 'Manage Time Slots',
 ];
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -357,6 +358,117 @@ function ensure_doctor_description_column($conn) {
     return (bool) $conn->query("ALTER TABLE doctors ADD COLUMN doctor_description TEXT NULL");
 }
 
+function ensure_doctor_schedule_break_columns($conn) {
+    $startCheck = $conn->query("SHOW COLUMNS FROM doctor_schedule LIKE 'break_start_time'");
+    if (!$startCheck || $startCheck->num_rows === 0) {
+        $conn->query("ALTER TABLE doctor_schedule ADD COLUMN break_start_time TIME NULL AFTER end_time");
+    }
+
+    $endCheck = $conn->query("SHOW COLUMNS FROM doctor_schedule LIKE 'break_end_time'");
+    if (!$endCheck || $endCheck->num_rows === 0) {
+        $conn->query("ALTER TABLE doctor_schedule ADD COLUMN break_end_time TIME NULL AFTER break_start_time");
+    }
+
+    return true;
+}
+
+function ensure_doctor_services_table($conn) {
+    return (bool) $conn->query("
+        CREATE TABLE IF NOT EXISTS doctor_services (
+            doctor_id INT NOT NULL,
+            service_id INT NOT NULL,
+            PRIMARY KEY (doctor_id, service_id)
+        )
+    ");
+}
+
+function ensure_doctor_time_locks_table($conn) {
+    return (bool) $conn->query("
+        CREATE TABLE IF NOT EXISTS doctor_time_locks (
+            lock_id INT AUTO_INCREMENT PRIMARY KEY,
+            doctor_id INT NOT NULL,
+            lock_date DATE NOT NULL,
+            start_time TIME NULL,
+            end_time TIME NULL,
+            reason VARCHAR(255) NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_doctor_lock_date (doctor_id, lock_date),
+            CONSTRAINT fk_doctor_time_locks_doctor
+                FOREIGN KEY (doctor_id) REFERENCES doctors(doctor_id)
+                ON DELETE CASCADE
+        )
+    ");
+}
+
+function doctor_time_slot_is_locked($conn, $doctorName, $date, $time) {
+    ensure_doctor_time_locks_table($conn);
+    $appointmentTime = strlen((string)$time) === 5 ? $time . ':00' : $time;
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) AS total
+        FROM doctor_time_locks dtl
+        INNER JOIN doctors d ON d.doctor_id = dtl.doctor_id
+        WHERE d.doctor_name = ?
+          AND dtl.lock_date = ?
+          AND (
+              dtl.start_time IS NULL
+              OR dtl.end_time IS NULL
+              OR (dtl.start_time < ADDTIME(?, '00:30:00') AND dtl.end_time > ?)
+          )
+    ");
+    $stmt->bind_param("ssss", $doctorName, $date, $appointmentTime, $appointmentTime);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    return (int)($row['total'] ?? 0) > 0;
+}
+
+function validate_doctor_time_lock_schedule($conn, $doctorId, $lockDate, $startTime = null, $endTime = null) {
+    ensure_doctor_schedule_break_columns($conn);
+    $dateObj = DateTime::createFromFormat('Y-m-d', (string)$lockDate);
+    if (!$dateObj) {
+        return 'Please choose a valid date.';
+    }
+
+    $availableDay = $dateObj->format('D');
+    $stmt = $conn->prepare("
+        SELECT start_time, end_time, break_start_time, break_end_time
+        FROM doctor_schedule
+        WHERE doctor_id = ?
+          AND available_day = ?
+        ORDER BY start_time ASC
+    ");
+    $stmt->bind_param("is", $doctorId, $availableDay);
+    $stmt->execute();
+    $scheduleRows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+
+    if (empty($scheduleRows)) {
+        return 'Selected doctor is not working on this day.';
+    }
+
+    if ($startTime === null || $endTime === null) {
+        return '';
+    }
+
+    foreach ($scheduleRows as $row) {
+        $workStart = (string)($row['start_time'] ?? '');
+        $workEnd = (string)($row['end_time'] ?? '');
+        if ($workStart === '' || $workEnd === '' || $workStart > $startTime || $workEnd < $endTime) {
+            continue;
+        }
+
+        $breakStart = $row['break_start_time'] ?? null;
+        $breakEnd = $row['break_end_time'] ?? null;
+        $insideBreakOnly = $breakStart && $breakEnd && $breakStart < $breakEnd && $breakStart <= $startTime && $breakEnd >= $endTime;
+        if (!$insideBreakOnly) {
+            return '';
+        }
+    }
+
+    return 'Selected time is outside this doctor\'s working hours.';
+}
+
 function ensure_service_overview_column($conn) {
     $columnCheck = $conn->query("SHOW COLUMNS FROM services LIKE 'service_overview'");
     if ($columnCheck && $columnCheck->num_rows > 0) {
@@ -477,6 +589,75 @@ function get_services($conn) {
     );
 }
 
+function service_required_specialist_keywords($serviceName, $serviceDescription = '') {
+    $text = strtolower((string) $serviceName . ' ' . (string) $serviceDescription);
+
+    $aliases = [
+        'dental' => ['dental', 'dentist', 'tooth', 'teeth', 'oral'],
+        'eye' => ['eye', 'ophthalmology', 'ophthalmologist', 'optometry', 'optometrist', 'vision', 'sight'],
+        'cardio' => ['cardio', 'cardiology', 'cardiologist', 'heart', 'cardiac'],
+        'physio' => ['physio', 'physiotherapy', 'physiotherapist', 'physical', 'rehab', 'rehabilitation'],
+        'pediatric' => ['pediatric', 'paediatric', 'pediatrician', 'paediatrician', 'child', 'children', 'kids'],
+        'dermatology' => ['dermatology', 'dermatologist', 'skin', 'acne', 'rash'],
+        'orthopedic' => ['orthopedic', 'orthopaedic', 'orthopedist', 'bone', 'joint', 'fracture'],
+        'neurology' => ['neurology', 'neurologist', 'brain', 'nerve', 'migraine'],
+        'ent' => ['ent', 'ear', 'nose', 'throat'],
+        'gynecology' => ['gynecology', 'gynaecology', 'gynecologist', 'gynaecologist', 'women', 'pregnancy'],
+    ];
+
+    $keywords = [];
+    foreach ($aliases as $canonical => $words) {
+        foreach ($words as $word) {
+            if (str_contains($text, $word)) {
+                $keywords = array_merge($keywords, $words, [$canonical]);
+                break;
+            }
+        }
+    }
+
+    if (empty($keywords)) {
+        foreach (['blood test', 'blood screening', 'vaccination', 'vaccine', 'general check-up', 'general checkup', 'health screening'] as $generalService) {
+            if (str_contains($text, $generalService)) {
+                return [];
+            }
+        }
+    }
+
+    if (empty($keywords)) {
+        $stopWords = [
+            'service', 'services', 'care', 'clinic', 'clinical', 'consultation', 'consult',
+            'check', 'checkup', 'examination', 'exam', 'screening', 'test', 'treatment',
+            'health', 'medical', 'routine', 'complete', 'professional', 'general',
+            'available', 'appointment', 'therapy'
+        ];
+        preg_match_all('/[a-z0-9]+/', $text, $matches);
+        foreach ($matches[0] ?? [] as $word) {
+            if (strlen($word) < 4 || in_array($word, $stopWords, true)) {
+                continue;
+            }
+            $keywords[] = $word;
+        }
+    }
+
+    return array_values(array_unique($keywords));
+}
+
+function doctor_can_provide_service($serviceName, $doctorSpecialist, $serviceDescription = '') {
+    $requiredKeywords = service_required_specialist_keywords($serviceName, $serviceDescription);
+    if (empty($requiredKeywords)) {
+        return true;
+    }
+
+    $specialist = strtolower((string) $doctorSpecialist);
+    foreach ($requiredKeywords as $keyword) {
+        if (str_contains($specialist, $keyword)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function service_default_overview($serviceName, $fallback = '') {
     $name = strtolower((string) $serviceName);
 
@@ -510,12 +691,27 @@ function service_default_overview($serviceName, $fallback = '') {
 function get_doctors($conn) {
     ensure_doctor_image_column($conn);
     ensure_doctor_description_column($conn);
+    ensure_doctor_schedule_break_columns($conn);
+    ensure_doctor_services_table($conn);
     return fetch_all_assoc(
         $conn,
         "SELECT d.doctor_id, d.doctor_image, d.doctor_name, d.doctor_specialist, d.doctor_description,
-                GROUP_CONCAT(DISTINCT ds.available_day ORDER BY FIELD(ds.available_day, 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun') SEPARATOR ', ') AS available_days
+                GROUP_CONCAT(DISTINCT ds.available_day ORDER BY FIELD(ds.available_day, 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun') SEPARATOR ', ') AS available_days,
+                GROUP_CONCAT(DISTINCT dsvc.service_id ORDER BY dsvc.service_id ASC SEPARATOR ',') AS service_ids,
+                GROUP_CONCAT(DISTINCT
+                    CONCAT(
+                        ds.available_day, '|',
+                        TIME_FORMAT(ds.start_time, '%H:%i'), '|',
+                        TIME_FORMAT(ds.end_time, '%H:%i'), '|',
+                        COALESCE(TIME_FORMAT(ds.break_start_time, '%H:%i'), ''), '|',
+                        COALESCE(TIME_FORMAT(ds.break_end_time, '%H:%i'), '')
+                    )
+                    ORDER BY FIELD(ds.available_day, 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'), ds.start_time ASC
+                    SEPARATOR ';;'
+                ) AS schedule_data
          FROM doctors d
          LEFT JOIN doctor_schedule ds ON ds.doctor_id = d.doctor_id
+         LEFT JOIN doctor_services dsvc ON dsvc.doctor_id = d.doctor_id
          GROUP BY d.doctor_id, d.doctor_image, d.doctor_name, d.doctor_specialist, d.doctor_description
          ORDER BY d.doctor_id ASC"
     );
@@ -683,9 +879,20 @@ function app_start($role, $page, $title = null) {
 
 function app_end() {
     render_modals();
+    $customerServiceButton = '';
+    if (($_SESSION['QuickCare_role'] ?? '') === 'user') {
+        $customerServiceButton = '
+    <a class="portal-customer-service-btn" href="https://wa.me/601110807180" target="_blank" rel="noopener" aria-label="Chat with customer service on WhatsApp" title="Customer Service WhatsApp" draggable="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 3a8 8 0 0 0-8 8v3a3 3 0 0 0 3 3h1v-6H6a6 6 0 0 1 12 0h-2v6h1a3 3 0 0 0 3-3v-3a8 8 0 0 0-8-8Z"/>
+        <path d="M9 18h2.2c.3.9 1.1 1.5 2.1 1.5H15a1 1 0 1 0 0-2h-1.7a.5.5 0 0 1-.5-.5v-.2H9V18Z"/>
+      </svg>
+    </a>';
+    }
 
     echo '
     </div></div></div>
+    ' . $customerServiceButton . '
     <div class="toast" id="toast"></div>
 
     <script>
@@ -808,10 +1015,12 @@ function render_dashboard($role) {
     ];
     foreach ($actions[$role] ?? [] as $a) echo '<a class="btn btn-outline w-full" href="' . e(page_url($a[1], $role)) . '">' . e($a[0]) . '</a>';
     echo '</div></div></div></div></div>';
-    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div><div class="appointment-detail-actions"><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button></div></div></div></div>';
+    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div><div class="appointment-detail-actions"><button type="button" class="btn btn-danger" id="detailCancelAction" style="display:none;width:auto">Cancel Appointment</button><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button></div></div></div></div>';
     if ($role === 'user') {
         echo '<div class="modal-overlay" id="modal-dashboard-payment-proof"><div class="modal payment-proof-modal"><div class="modal-header"><span class="modal-title">Payment Proof</span><button class="modal-close" onclick="closeModal(\'modal-dashboard-payment-proof\')">×</button></div><div class="modal-body"><div class="payment-proof-card" id="dashboardPaymentProofContent"></div></div></div></div>';
         echo '<div class="modal-overlay" id="modal-dashboard-receipt"><div class="modal receipt-modal"><div class="modal-header"><span class="modal-title">Payment Receipt</span><button class="modal-close" onclick="closeModal(\'modal-dashboard-receipt\')">×</button></div><div class="modal-body" id="dashboardReceiptContent"></div><div class="modal-footer"><button class="btn btn-primary" style="width:auto" onclick="window.print()">Print</button><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-dashboard-receipt\')">Close</button></div></div></div>';
+    } elseif (in_array($role, ['admin', 'staff'], true)) {
+        echo '<div class="modal-overlay" id="modal-complete-appointment"><div class="modal"><div class="modal-header"><span class="modal-title">Complete Appointment</span><button class="modal-close" onclick="closeModal(\'modal-complete-appointment\')">×</button></div><div class="modal-body"><p class="text-muted mb-16">Are you sure this appointment has been completed?</p></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-complete-appointment\')">Cancel</button><a class="btn btn-teal" id="confirmCompleteAppointmentAction" style="width:auto" href="#">Complete</a></div></div></div>';
     }
     echo '<script>
     function formatStatusLabel(status) {
@@ -831,10 +1040,22 @@ function render_dashboard($role) {
     }
     function setDetailPaymentAction(button) {
         const action = document.getElementById("detailPaymentAction");
+        const cancelAction = document.getElementById("detailCancelAction");
         if (!action) return;
         const status = button.dataset.status || "";
         const payment = button.dataset.payment || "";
         const isCancelled = status === "cancelled";
+        if (cancelAction) {
+            cancelAction.style.display = "none";
+            cancelAction.onclick = null;
+            if (button.dataset.cancelCode) {
+                cancelAction.onclick = function () {
+                    closeModal("modal-appointment-details");
+                    openCancelAppointmentModal({ dataset: { code: button.dataset.cancelCode } });
+                };
+                cancelAction.style.display = "inline-flex";
+            }
+        }
         if (!button.dataset.payUrl && !button.dataset.proofUrl && !button.dataset.receiptId && !button.dataset.refundProofUrl && !button.dataset.completeUrl) {
             action.style.display = "none";
             action.onclick = null;
@@ -847,9 +1068,9 @@ function render_dashboard($role) {
         action.style.width = "auto";
 
         if (button.dataset.completeUrl) {
-            action.textContent = "Complete Appointment";
+            action.textContent = "Complete";
             action.className = "btn btn-teal";
-            action.onclick = function () { window.location.href = button.dataset.completeUrl; };
+            action.onclick = function () { openCompleteAppointmentModal(button.dataset.completeUrl); };
         } else if (!isCancelled && payment === "pending") {
             action.textContent = "Pay";
             action.onclick = function () { window.location.href = button.dataset.payUrl || ""; };
@@ -912,6 +1133,12 @@ function render_dashboard($role) {
         setDetailBadge("detailPayment", button.dataset.payment || "");
         setDetailPaymentAction(button);
         openModal("modal-appointment-details");
+    }
+    function openCompleteAppointmentModal(url) {
+        const action = document.getElementById("confirmCompleteAppointmentAction");
+        if (!action || !url) return;
+        action.href = url;
+        openModal("modal-complete-appointment");
     }
     function openDashboardPaymentProof(proofUrl, proofExt, title) {
         const content = document.getElementById("dashboardPaymentProofContent");
@@ -1113,7 +1340,7 @@ function render_services($role, $showToolbar = true) {
     echo '<div class="services-grid" id="servicesGrid">';
     foreach ($services as $s) {
         $savedOverview = trim((string)($s['service_overview'] ?? ''));
-        $longDesc = $savedOverview !== '' ? $savedOverview : service_default_overview($s['service_name'], $s['service_description']);
+        $longDesc = $savedOverview !== '' ? $savedOverview : service_default_overview($s['service_name'], 'No service overview added yet.');
         $name = strtolower($s['service_name']);
         $icon = get_service_icon($s['service_name']);
 
@@ -1150,7 +1377,7 @@ function render_services($role, $showToolbar = true) {
         if ($role === 'admin') {
             echo '<div class="service-actions" onclick="event.stopPropagation()" onmouseenter="this.closest(\'.service-card\')?.classList.add(\'service-actions-hover\')" onmouseleave="this.closest(\'.service-card\')?.classList.remove(\'service-actions-hover\')">
                     <button class="btn btn-sm btn-outline" type="button" onclick="openEditServiceModal(event, this)" data-id="' . e($s['service_id']) . '" data-name="' . e($s['service_name']) . '" data-fee="' . e(number_format((float) $s['service_price'], 2, '.', '')) . '" data-description="' . e($s['service_description']) . '" data-overview="' . e($longDesc) . '">✏️</button>
-                    <a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'service', 'id' => (int)$s['service_id']])) . '" onclick="event.stopPropagation(); return confirm(\'Permanently delete this service?\')">🗑</a>
+                    <a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'service', 'id' => (int)$s['service_id']])) . '" onclick="openDeleteServiceModal(event, this)">🗑</a>
                   </div>';
         }
         echo '</div>';
@@ -1159,7 +1386,10 @@ function render_services($role, $showToolbar = true) {
     if ($role === 'admin') {
         $adminOverviewControls = '<button class="btn btn-outline" type="button" id="serviceOverviewEditBtn" style="width:auto; padding: 6px 12px; margin-left:auto;" onclick="toggleServiceOverviewEdit(true)">Edit Overview</button>';
     }
-
+    $deleteServiceModal = '';
+    if ($role === 'admin') {
+        $deleteServiceModal = '<div class="modal-overlay" id="modal-delete-service"><div class="modal"><div class="modal-header"><span class="modal-title">Delete Service</span><button class="modal-close" onclick="closeModal(\'modal-delete-service\')">×</button></div><div class="modal-body"><p class="text-muted mb-16">Are you sure you want to delete this clinic service?</p><div class="appointment-detail-code"><span>Service</span><strong id="deleteServiceName">-</strong></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-delete-service\')">Cancel</button><a class="btn btn-danger" id="confirmDeleteServiceAction" style="width:auto" href="#">Delete</a></div></div></div>';
+    }
     echo '</div>
     <div class="modal-overlay" id="modal-service-details">
         <div class="modal">
@@ -1191,9 +1421,20 @@ function render_services($role, $showToolbar = true) {
             </div>
         </div>
     </div>
+    ' . $deleteServiceModal . '
     <script>
     if (typeof openModal !== "function") { window.openModal = function(id) { document.getElementById(id).classList.add("active"); }; }
     if (typeof closeModal !== "function") { window.closeModal = function(id) { document.getElementById(id).classList.remove("active"); }; }
+    function openDeleteServiceModal(event, link) {
+        event.preventDefault();
+        event.stopPropagation();
+        const modalAction = document.getElementById("confirmDeleteServiceAction");
+        const modalName = document.getElementById("deleteServiceName");
+        const card = link.closest(".service-card");
+        if (modalAction) modalAction.href = link.href || "#";
+        if (modalName) modalName.textContent = card?.dataset.name || "Selected service";
+        openModal("modal-delete-service");
+    }
     function showServiceDetails(el) {
         window.currentServiceCard = el;
         document.getElementById("serviceDetailIcon").textContent = el.dataset.icon;
@@ -1251,17 +1492,26 @@ function render_doctors($role, $showToolbar = true) {
                    data-image="' . e($d['doctor_image'] ?? '') . '" 
                    data-spec="' . e($d['doctor_specialist']) . '" 
                    data-avail="Available ' . e($available) . '" 
-                   data-desc="' . e($description) . '">
+                   data-desc="' . e($description) . '"
+                   data-schedule="' . e($d['schedule_data'] ?? '') . '">
                 ' . doctor_avatar_html($d) . '
                 <div class="doctor-name">' . e($d['doctor_name']) . '</div>
                 <div class="doctor-spec">' . e($d['doctor_specialist']) . '</div>
                 <div class="doctor-avail">✅ Available ' . e($available) . '</div>';
-        if ($role === 'admin') echo '<div class="doctor-actions" onclick="event.stopPropagation()" onmouseenter="this.closest(\'.doctor-card\')?.classList.add(\'doctor-actions-hover\')" onmouseleave="this.closest(\'.doctor-card\')?.classList.remove(\'doctor-actions-hover\')"><button class="btn btn-sm btn-outline" onclick="openEditDoctorModal(event, this)" data-id="' . e($d['doctor_id']) . '" data-name="' . e($d['doctor_name']) . '" data-spec="' . e($d['doctor_specialist']) . '" data-days="' . e($d['available_days']) . '">✏️</button><a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'doctor', 'id' => (int)$d['doctor_id']])) . '" onclick="event.stopPropagation(); return confirm(\'Permanently delete this doctor profile?\')">🗑</a></div>';
+        if ($role === 'admin') echo '<div class="doctor-actions" onclick="event.stopPropagation()" onmouseenter="this.closest(\'.doctor-card\')?.classList.add(\'doctor-actions-hover\')" onmouseleave="this.closest(\'.doctor-card\')?.classList.remove(\'doctor-actions-hover\')"><button class="btn btn-sm btn-outline" onclick="openEditDoctorModal(event, this)" data-id="' . e($d['doctor_id']) . '" data-name="' . e($d['doctor_name']) . '" data-initials="' . e(name_avatar($d['doctor_name'] ?? 'Doctor')) . '" data-image="' . e($d['doctor_image'] ?? '') . '" data-spec="' . e($d['doctor_specialist']) . '" data-days="' . e($d['available_days']) . '" data-service-ids="' . e($d['service_ids'] ?? '') . '">✏️</button><a class="btn btn-sm btn-danger" href="' . e(action_url('delete', ['type' => 'doctor', 'id' => (int)$d['doctor_id']])) . '" onclick="openDeleteDoctorModal(event, this)">🗑</a></div>';
         echo '</div>';
     }
     $adminAboutControls = '';
     if ($role === 'admin') {
         $adminAboutControls = '<button class="btn btn-outline" type="button" id="doctorAboutEditBtn" style="width:auto; padding: 6px 12px; margin-left:auto;" onclick="toggleDoctorAboutEdit(true)">Edit About</button>';
+    }
+    $deleteDoctorModal = '';
+    $avatarPreviewModal = '';
+    if ($role === 'guest') {
+        $avatarPreviewModal = '<div class="modal-overlay" id="modal-avatar-preview"><div class="modal avatar-preview-modal"><div class="modal-header"><span class="modal-title" id="avatarPreviewTitle">Avatar</span><button class="modal-close" onclick="closeModal(\'modal-avatar-preview\')">&times;</button></div><div class="modal-body"><div class="avatar-preview-content" id="avatarPreviewContent"></div></div></div></div>';
+    }
+    if ($role === 'admin') {
+        $deleteDoctorModal = '<div class="modal-overlay" id="modal-delete-doctor"><div class="modal"><div class="modal-header"><span class="modal-title">Delete Doctor</span><button class="modal-close" onclick="closeModal(\'modal-delete-doctor\')">×</button></div><div class="modal-body"><p class="text-muted mb-16">Are you sure you want to delete this doctor profile?</p><div class="appointment-detail-code"><span>Doctor</span><strong id="deleteDoctorName">-</strong></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-delete-doctor\')">Cancel</button><a class="btn btn-danger" id="confirmDeleteDoctorAction" style="width:auto" href="#">Delete</a></div></div></div>';
     }
     echo '</div>
     <div class="modal-overlay" id="modal-doctor-details">
@@ -1295,18 +1545,78 @@ function render_doctors($role, $showToolbar = true) {
             </div>
         </div>
     </div>
+    ' . $deleteDoctorModal . '
+    ' . $avatarPreviewModal . '
     <script>
     if (typeof openModal !== "function") { window.openModal = function(id) { document.getElementById(id).classList.add("active"); }; }
     if (typeof closeModal !== "function") { window.closeModal = function(id) { document.getElementById(id).classList.remove("active"); }; }
+    if (typeof window.openAvatarPreview !== "function") {
+        window.openAvatarPreview = function(url, initials, title) {
+            const titleEl = document.getElementById("avatarPreviewTitle");
+            const content = document.getElementById("avatarPreviewContent");
+            if (!content) return;
+            content.innerHTML = "";
+            if (titleEl) titleEl.textContent = title || "Avatar";
+
+            if (url) {
+                const img = document.createElement("img");
+                img.className = "avatar-preview-image";
+                img.src = url;
+                img.alt = title || "Avatar preview";
+                content.appendChild(img);
+            } else {
+                const fallback = document.createElement("div");
+                fallback.className = "avatar-preview-initials";
+                fallback.textContent = initials || "?";
+                content.appendChild(fallback);
+            }
+            openModal("modal-avatar-preview");
+        };
+    }
+    if (typeof window.openAvatarPreviewFromTrigger !== "function") {
+        window.openAvatarPreviewFromTrigger = function(trigger) {
+            openAvatarPreview(
+                trigger?.dataset?.avatarUrl || "",
+                trigger?.dataset?.avatarInitials || trigger?.textContent?.trim() || "",
+                trigger?.dataset?.avatarTitle || "Avatar"
+            );
+        };
+    }
+    function openDeleteDoctorModal(event, link) {
+        event.preventDefault();
+        event.stopPropagation();
+        const modalAction = document.getElementById("confirmDeleteDoctorAction");
+        const modalName = document.getElementById("deleteDoctorName");
+        const card = link.closest(".doctor-card");
+        if (modalAction) modalAction.href = link.href || "#";
+        if (modalName) modalName.textContent = card?.dataset.name || "Selected doctor";
+        openModal("modal-delete-doctor");
+    }
     function showDoctorDetails(el) {
         const avatar = document.getElementById("doctorDetailAvatar");
         if (el.dataset.image) {
             avatar.classList.add("doctor-avatar-image");
             avatar.innerHTML = "<img src=\"' . e(app_url('uploads/doctors/')) . '" + encodeURIComponent(el.dataset.image) + "\" alt=\"Doctor photo\">";
+            avatar.dataset.avatarUrl = "' . e(app_url('uploads/doctors/')) . '" + encodeURIComponent(el.dataset.image);
         } else {
             avatar.classList.remove("doctor-avatar-image");
             avatar.textContent = el.dataset.initials;
+            avatar.dataset.avatarUrl = "";
         }
+        avatar.dataset.avatarInitials = el.dataset.initials || "";
+        avatar.dataset.avatarTitle = el.dataset.name || "Doctor Photo";
+        avatar.setAttribute("role", "button");
+        avatar.setAttribute("tabindex", "0");
+        avatar.onclick = function(event) {
+            event.stopPropagation();
+            openAvatarPreviewFromTrigger(avatar);
+        };
+        avatar.onkeydown = function(event) {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                openAvatarPreviewFromTrigger(avatar);
+            }
+        };
         document.getElementById("doctorDetailName").textContent = el.dataset.name;
         document.getElementById("doctorDetailSpec").textContent = el.dataset.spec;
         document.getElementById("doctorDetailAvail").textContent = el.dataset.avail;
@@ -1416,6 +1726,9 @@ function appointment_actions($role, $a) {
 
     if (in_array($role, ['admin', 'staff'], true)) {
         $canComplete = in_array($appointmentStatus, ['confirm', 'confirmed'], true);
+        if (!in_array($appointmentStatus, ['completed', 'cancelled', 'rejected'], true)) {
+            $detailsAttrs .= ' data-cancel-code="' . e($appointmentId) . '"';
+        }
         if ($canComplete) {
             $detailsAttrs .= ' data-complete-url="' . e(action_url('update_status', ['id' => $appointmentId])) . '"';
         }
@@ -1490,7 +1803,7 @@ function appointment_actions($role, $a) {
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openPaymentProofModal(this)" data-proof-url="' . e($refundProofUrl) . '" data-proof-ext="' . e($refundProofExt) . '" data-proof-title="Refund Proof">View Refund Proof</button>';
         }
         if ($canComplete) {
-            $menuItems[] = '<a class="appt-menu-item" href="' . e(action_url('update_status', ['id' => $appointmentId])) . '">Complete</a>';
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openCompleteAppointmentModal(this.dataset.completeUrl)" data-complete-url="' . e(action_url('update_status', ['id' => $appointmentId])) . '">Complete</button>';
         }
         $menuItems[] = '<button type="button" class="appt-menu-item danger" onclick="openCancelAppointmentModal(this)" data-code="' . e($appointmentId) . '">Cancel</button>';
         return '<div class="appt-action-menu"><button type="button" class="appt-menu-trigger" onclick="toggleAppointmentMenu(event, this)" aria-label="Appointment actions">...</button><div class="appt-menu-list">' . implode('', $menuItems) . '</div></div>';
@@ -1536,7 +1849,7 @@ function render_appointments($role) {
     }
 
     echo '</tbody></table></div></div>';
-    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div><div class="appointment-detail-actions"><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button></div></div></div></div>';
+    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div><div class="appointment-detail-actions"><button type="button" class="btn btn-danger" id="detailCancelAction" style="display:none;width:auto">Cancel</button><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button></div></div></div></div>';
     if ($role === 'user') {
         echo '<div class="modal-overlay" id="modal-edit-notes"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Notes</span><button class="modal-close" onclick="closeModal(\'modal-edit-notes\')">×</button></div><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="save_appointment_notes"><input type="hidden" name="appointment_code" id="editNotesAppointmentCode"><div class="modal-body"><div class="form-group"><label for="editAppointmentNotes">Notes</label><textarea class="form-control" id="editAppointmentNotes" name="notes" rows="7"></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-edit-notes\')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>';
         echo '<div class="modal-overlay" id="modal-cancel-appointment"><div class="modal"><div class="modal-header"><span class="modal-title">Cancel Appointment</span><button class="modal-close" onclick="closeModal(\'modal-cancel-appointment\')">×</button></div><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="cancel_appointment"><input type="hidden" name="id" id="cancelAppointmentCode"><div class="modal-body"><p class="text-muted mb-16">Are you sure you want to cancel this appointment?</p><div class="form-group"><label for="cancelAppointmentReason">Reason</label><textarea class="form-control" id="cancelAppointmentReason" name="reason" rows="4" placeholder="Please tell us why you are cancelling..." required></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-cancel-appointment\')">Keep Appointment</button><button class="btn btn-danger" style="width:auto">Cancel Appointment</button></div></form></div></div>';
@@ -1547,6 +1860,7 @@ function render_appointments($role) {
     if ($role !== 'user') {
         echo '<div class="modal-overlay" id="modal-cancel-appointment"><div class="modal"><div class="modal-header"><span class="modal-title">Cancel Appointment</span><button class="modal-close" onclick="closeModal(\'modal-cancel-appointment\')">×</button></div><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="cancel_appointment"><input type="hidden" name="id" id="cancelAppointmentCode"><div class="modal-body"><p class="text-muted mb-16">Are you sure you want to cancel this appointment?</p><div class="form-group"><label for="cancelAppointmentReason">Reason</label><textarea class="form-control" id="cancelAppointmentReason" name="reason" rows="4" placeholder="Please tell us why you are cancelling..." required></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-cancel-appointment\')">Keep Appointment</button><button class="btn btn-danger" style="width:auto">Cancel Appointment</button></div></form></div></div>';
         echo '<div class="modal-overlay" id="modal-payment-proof"><div class="modal payment-proof-modal"><div class="modal-header"><span class="modal-title">Payment Proof</span><button class="modal-close" onclick="closeModal(\'modal-payment-proof\')">×</button></div><div class="modal-body"><div class="payment-proof-card" id="paymentProofContent"></div></div><div class="modal-footer"><button type="button" class="btn btn-primary" style="width:auto" onclick="closeModal(\'modal-payment-proof\')">Close</button></div></div></div>';
+        echo '<div class="modal-overlay" id="modal-complete-appointment"><div class="modal"><div class="modal-header"><span class="modal-title">Complete Appointment</span><button class="modal-close" onclick="closeModal(\'modal-complete-appointment\')">×</button></div><div class="modal-body"><p class="text-muted mb-16">Are you sure this appointment has been completed?</p></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-complete-appointment\')">Cancel</button><a class="btn btn-teal" id="confirmCompleteAppointmentAction" style="width:auto" href="#">Complete</a></div></div></div>';
     }
     echo '<script>
     function formatStatusLabel(status) {
@@ -1567,10 +1881,22 @@ function render_appointments($role) {
     }
     function setDetailPaymentAction(button) {
         const action = document.getElementById("detailPaymentAction");
+        const cancelAction = document.getElementById("detailCancelAction");
         if (!action) return;
         const status = button.dataset.status || "";
         const payment = button.dataset.payment || "";
         const isCancelled = status === "cancelled";
+        if (cancelAction) {
+            cancelAction.style.display = "none";
+            cancelAction.onclick = null;
+            if (button.dataset.cancelCode) {
+                cancelAction.onclick = function () {
+                    closeModal("modal-appointment-details");
+                    openCancelAppointmentModal({ dataset: { code: button.dataset.cancelCode } });
+                };
+                cancelAction.style.display = "inline-flex";
+            }
+        }
         if (!button.dataset.payUrl && !button.dataset.proofUrl && !button.dataset.receiptId && !button.dataset.refundProofUrl && !button.dataset.completeUrl) {
             action.style.display = "none";
             action.onclick = null;
@@ -1583,9 +1909,9 @@ function render_appointments($role) {
         action.style.width = "auto";
 
         if (button.dataset.completeUrl) {
-            action.textContent = "Complete Appointment";
+            action.textContent = "Complete";
             action.className = "btn btn-teal";
-            action.onclick = function () { window.location.href = button.dataset.completeUrl; };
+            action.onclick = function () { openCompleteAppointmentModal(button.dataset.completeUrl); };
         } else if (!isCancelled && payment === "pending") {
             action.textContent = "Pay";
             action.onclick = function () { window.location.href = button.dataset.payUrl || ""; };
@@ -1648,6 +1974,12 @@ function render_appointments($role) {
         setDetailBadge("detailPayment", button.dataset.payment || "");
         setDetailPaymentAction(button);
         openModal("modal-appointment-details");
+    }
+    function openCompleteAppointmentModal(url) {
+        const action = document.getElementById("confirmCompleteAppointmentAction");
+        if (!action || !url) return;
+        action.href = url;
+        openModal("modal-complete-appointment");
     }
     function openEditNotesModal(button) {
         document.getElementById("editNotesAppointmentCode").value = button.dataset.code || "";
@@ -1797,7 +2129,7 @@ function render_book_legacy() {
     $services = get_services($conn);
     $doctors = get_doctors($conn);
     echo '<form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="book_appointment"><div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Choose Service</span></div><div class="card-body"><div class="services-grid">';
-    foreach ($services as $s) echo '<label class="service-card"><input type="checkbox" name="service" value="' . e($s['service_name']) . '" required> <span class="service-icon">' . e($s['service_icon']) . '</span><div class="service-name">' . e($s['service_name']) . '</div><div class="service-price">RM ' . e(number_format((float) $s['service_price'], 2)) . '</div><div class="service-desc">' . e($s['service_description']) . '</div></label>';
+    foreach ($services as $s) echo '<label class="service-card"><input type="radio" name="service" value="' . e($s['service_name']) . '" required> <span class="service-icon">' . e($s['service_icon']) . '</span><div class="service-name">' . e($s['service_name']) . '</div><div class="service-price">RM ' . e(number_format((float) $s['service_price'], 2)) . '</div><div class="service-desc">' . e($s['service_description']) . '</div></label>';
     echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Choose Doctor</span></div><div class="card-body"><div class="doctor-grid">';
     foreach ($doctors as $d) echo '<label class="doctor-card"><input type="radio" name="doctor" value="' . e($d['doctor_name']) . '" required>' . doctor_avatar_html($d) . '<div class="doctor-name">' . e($d['doctor_name']) . '</div><div class="doctor-spec">' . e($d['doctor_specialist']) . '</div><div class="doctor-avail">Available ' . e($d['available_days'] ?: 'Not scheduled') . '</div></label>';
     echo '</div></div></div></div><div class="card mt-20"><div class="card-header"><span class="card-title">Date, Time & Notes</span></div><div class="card-body"><div class="grid-2"><div class="form-group"><label>Date</label><input class="form-control" type="date" name="date" required></div><div class="form-group"><label>Time</label><select class="form-control" name="time" required><option>09:00</option><option>09:30</option><option>10:00</option><option>10:30</option><option>11:00</option><option>14:00</option></select></div></div><div class="form-group"><label>Symptoms / Notes</label><textarea class="form-control" rows="5" name="notes" placeholder="e.g. Fever for 3 days, headache…"></textarea></div><button class="btn btn-primary" style="width:auto">Confirm Appointment</button></div></div></form>';
@@ -1808,9 +2140,10 @@ function render_book() {
     $services = get_services($conn);
     $doctors = get_doctors($conn);
     $today = date('Y-m-d');
+    ensure_doctor_schedule_break_columns($conn);
     $scheduleRows = fetch_all_assoc(
         $conn,
-        "SELECT d.doctor_name, ds.available_day, ds.start_time, ds.end_time
+        "SELECT d.doctor_name, ds.available_day, ds.start_time, ds.end_time, ds.break_start_time, ds.break_end_time
          FROM doctor_schedule ds
          INNER JOIN doctors d ON d.doctor_id = ds.doctor_id
          ORDER BY d.doctor_id ASC, FIELD(ds.available_day, 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'), ds.start_time ASC"
@@ -1825,6 +2158,8 @@ function render_book() {
 
         $start = DateTime::createFromFormat('H:i:s', $row['start_time']) ?: DateTime::createFromFormat('H:i', $row['start_time']);
         $end = DateTime::createFromFormat('H:i:s', $row['end_time']) ?: DateTime::createFromFormat('H:i', $row['end_time']);
+        $breakStart = !empty($row['break_start_time']) ? (DateTime::createFromFormat('H:i:s', $row['break_start_time']) ?: DateTime::createFromFormat('H:i', $row['break_start_time'])) : null;
+        $breakEnd = !empty($row['break_end_time']) ? (DateTime::createFromFormat('H:i:s', $row['break_end_time']) ?: DateTime::createFromFormat('H:i', $row['break_end_time'])) : null;
         if (!$start || !$end || $start >= $end) {
             continue;
         }
@@ -1838,7 +2173,10 @@ function render_book() {
 
         $slot = clone $start;
         while ($slot < $end) {
-            $doctorSchedules[$doctorName][$day][] = $slot->format('H:i');
+            $isBreak = $breakStart && $breakEnd && $breakStart < $breakEnd && $slot >= $breakStart && $slot < $breakEnd;
+            if (!$isBreak) {
+                $doctorSchedules[$doctorName][$day][] = $slot->format('H:i');
+            }
             $slot->modify('+30 minutes');
         }
         $doctorSchedules[$doctorName][$day] = array_values(array_unique($doctorSchedules[$doctorName][$day]));
@@ -1868,6 +2206,35 @@ function render_book() {
         $bookedSlots[$doctorName][$appointmentDate][] = date('H:i', strtotime($appointmentTime));
     }
     $bookedSlotsJson = json_encode($bookedSlots, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT);
+    ensure_doctor_time_locks_table($conn);
+    $lockedRows = fetch_all_assoc(
+        $conn,
+        "SELECT d.doctor_name, dtl.lock_date, dtl.start_time, dtl.end_time, dtl.reason
+         FROM doctor_time_locks dtl
+         INNER JOIN doctors d ON d.doctor_id = dtl.doctor_id
+         WHERE dtl.lock_date >= CURDATE()
+         ORDER BY dtl.lock_date ASC, dtl.start_time ASC"
+    );
+    $lockedSlots = [];
+    foreach ($lockedRows as $row) {
+        $doctorName = $row['doctor_name'] ?? '';
+        $lockDate = $row['lock_date'] ?? '';
+        if ($doctorName === '' || $lockDate === '') {
+            continue;
+        }
+        if (!isset($lockedSlots[$doctorName])) {
+            $lockedSlots[$doctorName] = [];
+        }
+        if (!isset($lockedSlots[$doctorName][$lockDate])) {
+            $lockedSlots[$doctorName][$lockDate] = [];
+        }
+        $lockedSlots[$doctorName][$lockDate][] = [
+            'start' => !empty($row['start_time']) ? date('H:i', strtotime($row['start_time'])) : null,
+            'end' => !empty($row['end_time']) ? date('H:i', strtotime($row['end_time'])) : null,
+            'reason' => $row['reason'] ?? '',
+        ];
+    }
+    $lockedSlotsJson = json_encode($lockedSlots, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT);
 
     echo '<form id="bookingWizardForm" class="booking-wizard" method="post" action="' . e(app_url('action.php')) . '">';
     echo '<input type="hidden" name="action" value="book_appointment">';
@@ -1893,7 +2260,7 @@ function render_book() {
             $priceText = '0';
         }
         $icon = get_service_icon($s['service_name']);
-        echo '<button type="button" class="book-service-card js-select-service" data-service-name="' . e($s['service_name']) . '" data-service-price="' . e($priceText) . '" data-service-description="' . e($s['service_description']) . '">';
+        echo '<button type="button" class="book-service-card js-select-service" data-service-id="' . e((int)($s['service_id'] ?? 0)) . '" data-service-name="' . e($s['service_name']) . '" data-service-price="' . e($priceText) . '" data-service-description="' . e($s['service_description']) . '">';
         echo '<span class="service-icon">' . e($icon) . '</span>';
         echo '<div class="service-name">' . e($s['service_name']) . '</div>';
         echo '<div class="service-price">RM ' . e($priceText) . '</div>';
@@ -1909,14 +2276,14 @@ function render_book() {
     echo '<div class="book-doctor-grid">';
     foreach ($doctors as $d) {
         $availableDays = $d['available_days'] ?: 'Not scheduled';
-        echo '<button type="button" class="book-doctor-card js-select-doctor" data-doctor-name="' . e($d['doctor_name']) . '" data-doctor-specialist="' . e($d['doctor_specialist']) . '">';
+        echo '<button type="button" class="book-doctor-card js-select-doctor" data-doctor-name="' . e($d['doctor_name']) . '" data-doctor-specialist="' . e($d['doctor_specialist']) . '" data-service-ids="' . e($d['service_ids'] ?? '') . '">';
         echo doctor_avatar_html($d);
         echo '<div class="doctor-name">' . e($d['doctor_name']) . '</div>';
         echo '<div class="doctor-spec">' . e($d['doctor_specialist']) . '</div>';
         echo '<div class="doctor-avail">&#9989; ' . e($availableDays) . '</div>';
         echo '</button>';
     }
-    echo '</div>';
+    echo '</div><div class="book-empty-slots" id="bookDoctorEmpty" style="display:none">No doctors are available for this service.</div>';
     echo '<div class="book-nav"><button type="button" class="btn btn-outline js-back-step" data-back-step="1">&larr; Back</button><button type="button" class="btn btn-primary js-next-step" data-next-step="3">Next: Date &amp; Time &rarr;</button></div>';
     echo '</section>';
 
@@ -1957,6 +2324,7 @@ function render_book() {
 
         var doctorSchedules = ' . ($doctorSchedulesJson ?: '{}') . ';
         var bookedSlots = ' . ($bookedSlotsJson ?: '{}') . ';
+        var lockedSlots = ' . ($lockedSlotsJson ?: '{}') . ';
         var minDate = ' . json_encode($today) . ';
         var steps = wizard.querySelectorAll(".booking-step");
         var panels = wizard.querySelectorAll(".booking-panel");
@@ -1966,6 +2334,7 @@ function render_book() {
         var state = {
             services: [],
             servicePriceTotal: 0,
+            selectedServiceId: "",
             doctor: "",
             doctorSpecialist: "",
             date: "",
@@ -2006,6 +2375,26 @@ function render_book() {
             return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()];
         }
 
+        function lockedReasonForSlot(slot) {
+            var locks = ((lockedSlots[state.doctor] || {})[state.date] || []);
+            var slotParts = slot.split(":");
+            var slotEndMinutes = (Number(slotParts[0]) * 60) + Number(slotParts[1]) + 30;
+            for (var i = 0; i < locks.length; i++) {
+                var item = locks[i] || {};
+                if (!item.start || !item.end) {
+                    return item.reason || "Doctor unavailable";
+                }
+                var startParts = item.start.split(":");
+                var endParts = item.end.split(":");
+                var lockStartMinutes = (Number(startParts[0]) * 60) + Number(startParts[1]);
+                var lockEndMinutes = (Number(endParts[0]) * 60) + Number(endParts[1]);
+                if (lockStartMinutes < slotEndMinutes && lockEndMinutes > ((Number(slotParts[0]) * 60) + Number(slotParts[1]))) {
+                    return item.reason || "Doctor unavailable";
+                }
+            }
+            return "";
+        }
+
         function renderTimeSlots() {
             if (!timeGrid) return;
             timeGrid.innerHTML = "";
@@ -2030,13 +2419,15 @@ function render_book() {
             slots.forEach(function (slot) {
                 var btn = document.createElement("button");
                 var isBooked = booked.indexOf(slot) !== -1;
+                var lockReason = lockedReasonForSlot(slot);
+                var isLocked = lockReason !== "";
                 btn.type = "button";
-                btn.className = "book-time-slot js-time-slot" + (isBooked ? " unavailable" : "");
+                btn.className = "book-time-slot js-time-slot" + ((isBooked || isLocked) ? " unavailable" : "");
                 btn.dataset.time = slot;
                 btn.textContent = slot;
-                btn.disabled = isBooked;
-                if (isBooked) {
-                    btn.title = "Already booked";
+                btn.disabled = isBooked || isLocked;
+                if (isBooked || isLocked) {
+                    btn.title = isBooked ? "Already booked" : lockReason;
                     timeGrid.appendChild(btn);
                     return;
                 }
@@ -2059,13 +2450,54 @@ function render_book() {
             var selected = wizard.querySelectorAll(".js-select-service.selected");
             var names = [];
             var total = 0;
+            var selectedServiceId = "";
             selected.forEach(function (item) {
                 names.push(item.getAttribute("data-service-name") || "");
                 total += parseFloat(item.getAttribute("data-service-price") || "0") || 0;
+                selectedServiceId = item.getAttribute("data-service-id") || "";
             });
             state.services = names.filter(function (name) { return name !== ""; });
             state.servicePriceTotal = total;
+            state.selectedServiceId = selectedServiceId;
             serviceInput.value = state.services.join(", ");
+        }
+
+        function doctorMatchesSelectedService(doctorCard) {
+            if (!state.selectedServiceId) return true;
+            var serviceIds = (doctorCard.getAttribute("data-service-ids") || "").split(",").filter(Boolean);
+            return serviceIds.includes(state.selectedServiceId);
+        }
+
+        function filterDoctorsForService() {
+            var hasSelectedDoctor = false;
+            var visibleDoctorCount = 0;
+            wizard.querySelectorAll(".js-select-doctor").forEach(function (btn) {
+                var matches = doctorMatchesSelectedService(btn);
+                btn.style.display = matches ? "" : "none";
+                if (matches) {
+                    visibleDoctorCount++;
+                }
+                if (!matches && btn.classList.contains("selected")) {
+                    btn.classList.remove("selected");
+                    state.doctor = "";
+                    state.doctorSpecialist = "";
+                    doctorInput.value = "";
+                    renderTimeSlots();
+                }
+                if (matches && btn.classList.contains("selected")) {
+                    hasSelectedDoctor = true;
+                }
+            });
+            if (!hasSelectedDoctor && state.doctor) {
+                state.doctor = "";
+                state.doctorSpecialist = "";
+                doctorInput.value = "";
+                renderTimeSlots();
+            }
+            var doctorEmpty = document.getElementById("bookDoctorEmpty");
+            if (doctorEmpty) {
+                doctorEmpty.style.display = visibleDoctorCount === 0 ? "" : "none";
+            }
         }
 
         function updateSummary() {
@@ -2112,7 +2544,7 @@ function render_book() {
 
         function validateStep(stepNumber) {
             if (stepNumber === 1 && state.services.length === 0) {
-                alert("Please select at least one service first.");
+                alert("Please select a service first.");
                 return false;
             }
             if (stepNumber === 2 && !state.doctor) {
@@ -2138,8 +2570,12 @@ function render_book() {
 
         wizard.querySelectorAll(".js-select-service").forEach(function (btn) {
             btn.addEventListener("click", function () {
-                btn.classList.toggle("selected");
+                wizard.querySelectorAll(".js-select-service").forEach(function (item) {
+                    item.classList.remove("selected");
+                });
+                btn.classList.add("selected");
                 updateServiceState();
+                filterDoctorsForService();
                 updateSummary();
             });
         });
@@ -2426,6 +2862,210 @@ function render_reports() {
     </script>';
 }
 
+function render_time_slots() {
+    global $conn;
+    ensure_doctor_time_locks_table($conn);
+    $doctors = get_doctors($conn);
+    $doctorScheduleMap = [];
+    foreach ($doctors as $doctor) {
+        $doctorId = (string)(int)($doctor['doctor_id'] ?? 0);
+        $doctorScheduleMap[$doctorId] = [];
+        $scheduleData = trim((string)($doctor['schedule_data'] ?? ''));
+        if ($scheduleData === '') {
+            continue;
+        }
+        foreach (explode(';;', $scheduleData) as $scheduleItem) {
+            $parts = explode('|', $scheduleItem);
+            if (count($parts) < 3) {
+                continue;
+            }
+            $day = $parts[0] ?? '';
+            if ($day === '') {
+                continue;
+            }
+            if (!isset($doctorScheduleMap[$doctorId][$day])) {
+                $doctorScheduleMap[$doctorId][$day] = [];
+            }
+            $doctorScheduleMap[$doctorId][$day][] = [
+                'start' => $parts[1] ?? '',
+                'end' => $parts[2] ?? '',
+                'breakStart' => $parts[3] ?? '',
+                'breakEnd' => $parts[4] ?? '',
+            ];
+        }
+    }
+    $doctorScheduleMapJson = json_encode($doctorScheduleMap, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT);
+    $locks = fetch_all_assoc(
+        $conn,
+        "SELECT dtl.lock_id, dtl.lock_date, dtl.start_time, dtl.end_time, dtl.reason,
+                d.doctor_id, d.doctor_name, d.doctor_specialist
+         FROM doctor_time_locks dtl
+         INNER JOIN doctors d ON d.doctor_id = dtl.doctor_id
+         ORDER BY dtl.lock_date DESC, dtl.start_time ASC, dtl.lock_id DESC"
+    );
+    $doctorLockMap = [];
+    foreach ($locks as $lock) {
+        $doctorId = (string)(int)($lock['doctor_id'] ?? 0);
+        $lockDate = (string)($lock['lock_date'] ?? '');
+        if ($doctorId === '0' || $lockDate === '') {
+            continue;
+        }
+        if (!isset($doctorLockMap[$doctorId])) {
+            $doctorLockMap[$doctorId] = [];
+        }
+        if (!isset($doctorLockMap[$doctorId][$lockDate])) {
+            $doctorLockMap[$doctorId][$lockDate] = [];
+        }
+        $doctorLockMap[$doctorId][$lockDate][] = [
+            'start' => !empty($lock['start_time']) ? date('H:i', strtotime($lock['start_time'])) : null,
+            'end' => !empty($lock['end_time']) ? date('H:i', strtotime($lock['end_time'])) : null,
+        ];
+    }
+    $doctorLockMapJson = json_encode($doctorLockMap, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT);
+
+    echo '<div class="time-lock-grid">';
+    echo '<div class="card"><div class="card-header"><span class="card-title">Lock Doctor Availability</span></div><div class="card-body">';
+    echo '<form method="post" action="' . e(app_url('action.php')) . '" id="timeLockForm">';
+    echo '<input type="hidden" name="action" value="save_time_lock">';
+    echo '<div class="grid-2">';
+    echo '<div class="form-group"><label>Doctor</label><select class="form-control" name="doctor_id" required><option value="">Select doctor</option>';
+    foreach ($doctors as $doctor) {
+        echo '<option value="' . e((int)($doctor['doctor_id'] ?? 0)) . '">' . e($doctor['doctor_name']) . ' - ' . e($doctor['doctor_specialist']) . '</option>';
+    }
+    echo '</select></div>';
+    echo '<div class="form-group"><label>Date</label><input class="form-control" type="date" name="lock_date" min="' . e(date('Y-m-d')) . '" required></div>';
+    echo '</div>';
+    echo '<label class="time-lock-all-day"><input type="checkbox" name="all_day" value="1" id="timeLockAllDay" checked> Lock whole day</label>';
+    echo '<div class="grid-2 time-lock-range" id="timeLockRange">';
+    echo '<div class="form-group"><label>Start Time</label><input class="form-control" type="time" name="start_time" value="09:00" step="1800"></div>';
+    echo '<div class="form-group"><label>End Time</label><input class="form-control" type="time" name="end_time" value="18:00" step="1800"></div>';
+    echo '</div>';
+    echo '<div class="form-group"><label>Reason</label><input class="form-control" name="reason" maxlength="255" placeholder="e.g. Doctor leave, meeting, emergency"></div>';
+    echo '<button class="btn btn-primary" type="submit" style="width:auto">Lock Time Slot</button>';
+    echo '</form></div></div>';
+
+    echo '<div class="card"><div class="card-header"><span class="card-title">Locked Slots</span></div><div class="card-body time-lock-help">Locked slots will be disabled on the booking page and blocked again when the appointment is submitted.</div></div>';
+    echo '</div>';
+
+    echo '<div class="card mt-20"><div class="card-body" style="padding:0"><table><thead><tr><th>Doctor</th><th>Date</th><th>Time</th><th>Reason</th><th>Action</th></tr></thead><tbody>';
+    if (empty($locks)) {
+        echo '<tr><td colspan="5" style="text-align:center">No locked slots found.</td></tr>';
+    }
+    foreach ($locks as $lock) {
+        $timeText = empty($lock['start_time']) || empty($lock['end_time'])
+            ? 'Whole day'
+            : format_time_display($lock['start_time']) . ' - ' . format_time_display($lock['end_time']);
+        echo '<tr>';
+        echo '<td><strong>' . e($lock['doctor_name']) . '</strong><div class="text-muted text-sm">' . e($lock['doctor_specialist']) . '</div></td>';
+        echo '<td>' . e(format_date_display($lock['lock_date'])) . '</td>';
+        echo '<td>' . e($timeText) . '</td>';
+        echo '<td>' . e($lock['reason'] ?: '-') . '</td>';
+        echo '<td><button class="btn btn-sm btn-danger" style="width:auto" type="button" onclick="openUnlockTimeLockModal(this)" data-unlock-url="' . e(action_url('delete_time_lock', ['id' => (int)$lock['lock_id']])) . '" data-doctor="' . e($lock['doctor_name']) . '" data-date="' . e(format_date_display($lock['lock_date'])) . '" data-time="' . e($timeText) . '">Unlock</button></td>';
+        echo '</tr>';
+    }
+    echo '</tbody></table></div></div>';
+    echo '<div class="modal-overlay" id="modal-unlock-time-lock"><div class="modal"><div class="modal-header"><span class="modal-title">Unlock Time Slot</span><button class="modal-close" onclick="closeModal(\'modal-unlock-time-lock\')">×</button></div><div class="modal-body"><p class="text-muted mb-16">Are you sure you want to unlock this time slot?</p><div class="appointment-detail-code"><span>Doctor</span><strong id="unlockTimeLockDoctor">-</strong></div><div class="appointment-detail-list" style="margin-top:14px"><div><span>Date</span><strong id="unlockTimeLockDate">-</strong></div><div><span>Time</span><strong id="unlockTimeLockTime">-</strong></div></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-unlock-time-lock\')">Cancel</button><a class="btn btn-danger" id="confirmUnlockTimeLockAction" style="width:auto" href="#">Unlock</a></div></div></div>';
+
+    echo '<script>
+    (function () {
+        var doctorSchedules = ' . ($doctorScheduleMapJson ?: '{}') . ';
+        var existingLocks = ' . ($doctorLockMapJson ?: '{}') . ';
+        var form = document.getElementById("timeLockForm");
+        var allDay = document.getElementById("timeLockAllDay");
+        var range = document.getElementById("timeLockRange");
+        function selectedDayName(dateValue) {
+            var date = new Date(dateValue + "T00:00:00");
+            if (Number.isNaN(date.getTime())) return "";
+            return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()];
+        }
+        function rangeIsInsideSchedule(rows, start, end) {
+            return rows.some(function (row) {
+                if (!row.start || !row.end || row.start > start || row.end < end) return false;
+                var hasBreak = row.breakStart && row.breakEnd && row.breakStart < row.breakEnd;
+                var insideBreakOnly = hasBreak && row.breakStart <= start && row.breakEnd >= end;
+                return !insideBreakOnly;
+            });
+        }
+        function lockOverlapsExisting(doctorId, lockDate, allDaySelected, start, end) {
+            var locks = ((existingLocks[doctorId] || {})[lockDate] || []);
+            return locks.some(function (lock) {
+                if (!lock.start || !lock.end || allDaySelected) return true;
+                return lock.start < end && lock.end > start;
+            });
+        }
+        function showTimeLockNotification(message, type) {
+            var pageContent = document.querySelector(".page-content");
+            var notice = document.getElementById("timeLockNotification");
+            if (!notice) {
+                notice = document.createElement("div");
+                notice.id = "timeLockNotification";
+                if (pageContent) {
+                    pageContent.insertBefore(notice, pageContent.firstChild);
+                } else {
+                    document.body.appendChild(notice);
+                }
+            }
+            notice.textContent = message;
+            notice.className = "toast flash-message show " + (type || "error");
+            window.clearTimeout(notice.dataset.timer || 0);
+            notice.dataset.timer = window.setTimeout(function () {
+                notice.classList.add("hiding");
+                window.setTimeout(function () {
+                    notice.remove();
+                }, 350);
+            }, 3500);
+        }
+        window.openUnlockTimeLockModal = function (button) {
+            document.getElementById("unlockTimeLockDoctor").textContent = button.dataset.doctor || "-";
+            document.getElementById("unlockTimeLockDate").textContent = button.dataset.date || "-";
+            document.getElementById("unlockTimeLockTime").textContent = button.dataset.time || "-";
+            document.getElementById("confirmUnlockTimeLockAction").href = button.dataset.unlockUrl || "#";
+            openModal("modal-unlock-time-lock");
+        };
+        function syncRange() {
+            if (!range || !allDay) return;
+            range.style.display = allDay.checked ? "none" : "grid";
+            range.querySelectorAll("input").forEach(function (input) {
+                input.required = !allDay.checked;
+            });
+        }
+        allDay?.addEventListener("change", syncRange);
+        form?.addEventListener("submit", function (event) {
+            var doctorId = form.elements.doctor_id?.value || "";
+            var lockDate = form.elements.lock_date?.value || "";
+            var dayName = selectedDayName(lockDate);
+            var daySchedules = ((doctorSchedules[doctorId] || {})[dayName] || []);
+            var isAllDay = !!allDay?.checked;
+            if (!doctorId || !lockDate) return;
+            if (daySchedules.length === 0) {
+                event.preventDefault();
+                showTimeLockNotification("Selected doctor is not working on this day.", "error");
+                return;
+            }
+            if (isAllDay) {
+                if (lockOverlapsExisting(doctorId, lockDate, true, "", "")) {
+                    event.preventDefault();
+                    showTimeLockNotification("This doctor already has a locked slot on this date.", "error");
+                }
+                return;
+            }
+            var start = form.elements.start_time?.value || "";
+            var end = form.elements.end_time?.value || "";
+            if (!start || !end || end <= start || !rangeIsInsideSchedule(daySchedules, start, end)) {
+                event.preventDefault();
+                showTimeLockNotification("Selected time is outside this doctor\'s working hours.", "error");
+                return;
+            }
+            if (lockOverlapsExisting(doctorId, lockDate, false, start, end)) {
+                event.preventDefault();
+                showTimeLockNotification("This time slot overlaps with an existing locked slot.", "error");
+            }
+        });
+        syncRange();
+    })();
+    </script>';
+}
+
 function render_staff() {
     global $conn;
     $staff = fetch_all_assoc(
@@ -2563,11 +3203,18 @@ function render_schedule() {
         $canComplete = in_array($row['appointment_status'] ?? '', ['confirm', 'confirmed'], true);
         $action = !$canComplete
             ? '<span class="text-muted">-</span>'
-            : '<a class="btn btn-sm btn-teal" href="' . e(action_url('update_status', ['id' => $row['appointment_code']])) . '">Complete</a>';
+            : '<button type="button" class="btn btn-sm btn-teal" onclick="openCompleteAppointmentModal(this.dataset.completeUrl)" data-complete-url="' . e(action_url('update_status', ['id' => $row['appointment_code']])) . '">Complete</button>';
         echo '<tr><td>' . e(format_time_display($row['appointment_time'])) . '</td><td>' . e($row['name']) . '</td><td>' . e($row['doctor_name']) . '</td><td>' . e($row['service_name']) . '</td><td>' . appointment_badge($row['appointment_status'], 'staff') . '</td><td>' . $action . '</td></tr>';
     }
     echo '</tbody></table></div></div>';
+    echo '<div class="modal-overlay" id="modal-complete-appointment"><div class="modal"><div class="modal-header"><span class="modal-title">Complete Appointment</span><button class="modal-close" onclick="closeModal(\'modal-complete-appointment\')">×</button></div><div class="modal-body"><p class="text-muted mb-16">Are you sure this appointment has been completed?</p></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-complete-appointment\')">Cancel</button><a class="btn btn-teal" id="confirmCompleteAppointmentAction" style="width:auto" href="#">Complete</a></div></div></div>';
     echo '<script>
+    function openCompleteAppointmentModal(url) {
+        const action = document.getElementById("confirmCompleteAppointmentAction");
+        if (!action || !url) return;
+        action.href = url;
+        openModal("modal-complete-appointment");
+    }
     function filterSchedule() {
         const doctor = document.getElementById("scheduleDoctor")?.value.toLowerCase() || "";
         const rows = document.querySelectorAll(".data-table tbody tr");
@@ -2731,17 +3378,86 @@ function render_modals() {
     echo <<<'HTML'
 <div class="modal-overlay" id="modal-add-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Add Staff Member</span><button class="modal-close" onclick="closeModal('modal-add-staff')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_staff"><input type="hidden" name="role" value="staff"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" placeholder="e.g. Nurul Ain binti Razak" required></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" placeholder="staff@QuickCare.my" required></div><div class="form-group"><label>Password</label><input class="form-control" type="password" name="password" required></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone_number" data-phone-format placeholder="+60 12-345 6789"></div><div class="form-group"><label>Role</label><input class="form-control" value="Staff" readonly></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 <div class="modal-overlay" id="modal-edit-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Staff Member</span><button class="modal-close" onclick="closeModal('modal-edit-staff')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="update_staff"><input type="hidden" name="id" id="editStaffId"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" id="editStaffName" required></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" id="editStaffEmail" required></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone_number" id="editStaffPhone" data-phone-format placeholder="+60 12-345 6789"></div><div class="form-group"><label>Role</label><input class="form-control" value="Staff" readonly></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-edit-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save Changes</button></div></form></div></div>
-<div class="modal-overlay" id="modal-add-doctor"><div class="modal"><div class="modal-header"><span class="modal-title" id="doctorModalTitle">Add Doctor</span><button class="modal-close" onclick="closeModal('modal-add-doctor')">✕</button></div><form method="post" action="action.php" enctype="multipart/form-data"><input type="hidden" name="action" value="save_doctor"><input type="hidden" name="id" id="editDoctorId" value=""><div class="modal-body"><div class="form-group"><label>Doctor Photo</label><input class="form-control" type="file" name="doctor_image" id="editDoctorImage" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted" style="margin-top:6px">JPG, PNG, or WEBP. Max 2MB. Leave blank to keep the current photo.</p></div><div class="form-group"><label>Full Name</label><input class="form-control" name="name" id="editDoctorName" placeholder="e.g. Dr. Ahmad Fauzi" required></div><div class="form-group"><label>Specialization</label><input class="form-control" name="specialization" id="editDoctorSpec" required></div><div class="form-group"><label>Available Days</label><div id="doctorDaysContainer" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;"><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Mon"> Mon</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Tue"> Tue</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Wed"> Wed</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Thu"> Thu</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Fri"> Fri</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sat"> Sat</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sun"> Sun</label></div></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-doctor')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
+<div class="modal-overlay" id="modal-add-doctor"><div class="modal"><div class="modal-header"><span class="modal-title" id="doctorModalTitle">Add Doctor</span><button class="modal-close" onclick="closeModal('modal-add-doctor')">✕</button></div><form method="post" action="action.php" enctype="multipart/form-data"><input type="hidden" name="action" value="save_doctor"><input type="hidden" name="id" id="editDoctorId" value=""><div class="modal-body"><div class="profile-upload-area"><label class="profile-upload-avatar" for="editDoctorImage"><div class="profile-avatar-lg" id="doctorImagePreview">D</div><span>Change</span></label><input class="profile-file-input" type="file" name="doctor_image" id="editDoctorImage" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted profile-upload-note">Upload a square JPG, PNG, or WEBP image. Maximum file size is 2MB.</p></div><div class="form-group"><label>Full Name</label><input class="form-control" name="name" id="editDoctorName" placeholder="e.g. Dr. Ahmad Fauzi" required></div><div class="form-group"><label>Specialization</label><input class="form-control" name="specialization" id="editDoctorSpec" required></div><div class="form-group"><label>Services Provided</label><div id="doctorServicesContainer" style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:8px; margin-top:8px;"></div></div><div class="form-group"><label>Available Days</label><div id="doctorDaysContainer" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;"><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Mon"> Mon</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Tue"> Tue</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Wed"> Wed</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Thu"> Thu</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Fri"> Fri</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sat"> Sat</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sun"> Sun</label></div></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-doctor')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 <script>
+function setupDoctorScheduleInputs() {
+    const container = document.getElementById('doctorDaysContainer');
+    if (!container || document.getElementById('doctorScheduleTimeGroup')) return;
+    container.style.gridTemplateColumns = 'repeat(4, 1fr)';
+    container.closest('.form-group').insertAdjacentHTML('afterend',
+        '<div class="form-group" id="doctorScheduleTimeGroup">' +
+            '<label>Available Time</label>' +
+            '<div class="grid-2">' +
+                '<input class="form-control" type="time" name="schedule_start" id="doctorScheduleStart" value="09:00" step="1800" required>' +
+                '<input class="form-control" type="time" name="schedule_end" id="doctorScheduleEnd" value="18:00" step="1800" required>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-group" id="doctorBreakTimeGroup">' +
+            '<label>Break Time</label>' +
+            '<div class="grid-2">' +
+                '<input class="form-control" type="time" name="break_start" id="doctorBreakStart" value="13:00" step="1800" required>' +
+                '<input class="form-control" type="time" name="break_end" id="doctorBreakEnd" value="14:00" step="1800" required>' +
+            '</div>' +
+        '</div>'
+    );
+}
+function setDoctorImagePreview(image, initials) {
+    const preview = document.getElementById('doctorImagePreview');
+    if (!preview) return;
+    preview.classList.remove('doctor-avatar-image');
+    preview.innerHTML = '';
+    if (image) {
+        preview.classList.add('doctor-avatar-image');
+        preview.innerHTML = '<img src="' + image + '" alt="Doctor photo">';
+    } else {
+        preview.textContent = initials || 'D';
+    }
+}
+function resetDoctorScheduleInputs() {
+    setupDoctorScheduleInputs();
+    document.querySelectorAll('#doctorDaysContainer input[type="checkbox"]').forEach(cb => {
+        cb.checked = false;
+    });
+    document.getElementById('doctorScheduleStart').value = '09:00';
+    document.getElementById('doctorScheduleEnd').value = '18:00';
+    document.getElementById('doctorBreakStart').value = '13:00';
+    document.getElementById('doctorBreakEnd').value = '14:00';
+}
+function applyDoctorScheduleData(scheduleData) {
+    resetDoctorScheduleInputs();
+    const rows = (scheduleData || '').split(';;').filter(Boolean);
+    let firstStart = '';
+    let firstEnd = '';
+    let firstBreakStart = '';
+    let firstBreakEnd = '';
+    rows.forEach(row => {
+        const parts = row.split('|');
+        const day = parts[0] || '';
+        const start = parts[1] || '09:00';
+        const end = parts[2] || '18:00';
+        const breakStart = parts[3] || '13:00';
+        const breakEnd = parts[4] || '14:00';
+        const checkbox = document.querySelector('#doctorDaysContainer input[type="checkbox"][value="' + day + '"]');
+        if (checkbox) checkbox.checked = true;
+        if (!firstStart) firstStart = start;
+        if (!firstEnd) firstEnd = end;
+        if (!firstBreakStart) firstBreakStart = breakStart;
+        if (!firstBreakEnd) firstBreakEnd = breakEnd;
+    });
+    document.getElementById('doctorScheduleStart').value = firstStart || '09:00';
+    document.getElementById('doctorScheduleEnd').value = firstEnd || '18:00';
+    document.getElementById('doctorBreakStart').value = firstBreakStart || '13:00';
+    document.getElementById('doctorBreakEnd').value = firstBreakEnd || '14:00';
+}
 function openAddDoctorModal() {
     document.getElementById('doctorModalTitle').textContent = 'Add Doctor';
     document.getElementById('editDoctorId').value = '';
     document.getElementById('editDoctorName').value = '';
     document.getElementById('editDoctorSpec').value = '';
     document.getElementById('editDoctorImage').value = '';
-    document.querySelectorAll('#doctorDaysContainer input[type="checkbox"]').forEach(cb => {
-        cb.checked = false;
-    });
+    setDoctorImagePreview('', 'D');
+    resetDoctorServiceInputs();
+    resetDoctorScheduleInputs();
     openModal('modal-add-doctor');
 }
 function openEditDoctorModal(event, btn) {
@@ -2751,14 +3467,26 @@ function openEditDoctorModal(event, btn) {
     document.getElementById('editDoctorName').value = btn.dataset.name;
     document.getElementById('editDoctorSpec').value = btn.dataset.spec;
     document.getElementById('editDoctorImage').value = '';
-    const days = btn.dataset.days.split(', ');
-    document.querySelectorAll('#doctorDaysContainer input[type="checkbox"]').forEach(cb => {
-        cb.checked = days.includes(cb.value);
-    });
+    setDoctorImagePreview(
+        btn.dataset.image ? 'uploads/doctors/' + encodeURIComponent(btn.dataset.image) : '',
+        btn.dataset.initials || 'D'
+    );
+    applyDoctorServiceData(btn.dataset.serviceIds || '');
+    applyDoctorScheduleData(btn.closest('.doctor-card')?.dataset.schedule || '');
     openModal('modal-add-doctor');
 }
+document.getElementById('editDoctorImage')?.addEventListener('change', function () {
+    const file = this.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function (event) {
+        setDoctorImagePreview(event.target.result, 'D');
+    };
+    reader.readAsDataURL(file);
+});
+setupDoctorScheduleInputs();
 </script>
-<div class="modal-overlay" id="modal-add-service"><div class="modal"><div class="modal-header"><span class="modal-title" id="serviceModalTitle">Add Service</span><button class="modal-close" onclick="closeModal('modal-add-service')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_service"><input type="hidden" name="id" id="editServiceId" value=""><div class="modal-body"><div class="form-group"><label>Service Name</label><input class="form-control" name="name" id="editServiceName" placeholder="e.g. Dental Cleaning" required></div><div class="form-group"><label>Fee (RM)</label><input class="form-control" type="number" step="0.01" name="fee" id="editServiceFee" required></div><div class="form-group"><label>Description</label><textarea class="form-control" name="description" id="editServiceDescription" rows="3" required></textarea></div><p class="text-muted" style="font-size:0.75rem; margin-top:8px">Note: The system will automatically assign an icon based on the service name.</p></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-service')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
+<div class="modal-overlay" id="modal-add-service"><div class="modal"><div class="modal-header"><span class="modal-title" id="serviceModalTitle">Add Service</span><button class="modal-close" onclick="closeModal('modal-add-service')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_service"><input type="hidden" name="id" id="editServiceId" value=""><div class="modal-body"><div class="form-group"><label>Service Name</label><input class="form-control" name="name" id="editServiceName" placeholder="e.g. Dental Cleaning" required></div><div class="form-group"><label>Fee</label><div style="display:flex; align-items:center; border:1px solid var(--border); border-radius:8px; background:var(--surface); overflow:hidden;"><span style="padding:0 14px; color:var(--text-muted); font-weight:700;">RM</span><input class="form-control" style="border:0; border-left:1px solid var(--border); border-radius:0;" type="text" inputmode="numeric" name="fee" id="editServiceFee" placeholder="0.00" required></div></div><div class="form-group"><label>Card Description</label><textarea class="form-control" name="description" id="editServiceDescription" rows="3" required></textarea></div><p class="text-muted" style="font-size:0.75rem; margin-top:8px">Note: The system will automatically assign an icon based on the service name.</p></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-service')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 <script>
 function openAddServiceModal() {
     document.getElementById('serviceModalTitle').textContent = 'Add Service';
@@ -2768,17 +3496,118 @@ function openAddServiceModal() {
     document.getElementById('editServiceDescription').value = '';
     openModal('modal-add-service');
 }
+function serviceFeeToCents(value) {
+    const amount = Number.parseFloat(value || '0');
+    if (Number.isNaN(amount)) return '';
+    return (Math.round(amount * 100) / 100).toFixed(2);
+}
+function formatServiceFeeInput(input) {
+    const digits = input.value.replace(/\D+/g, '');
+    input.value = digits ? (Number.parseInt(digits, 10) / 100).toFixed(2) : '';
+}
 function openEditServiceModal(event, btn) {
     event.stopPropagation();
     document.getElementById('serviceModalTitle').textContent = 'Edit Service';
     document.getElementById('editServiceId').value = btn.dataset.id || '';
     document.getElementById('editServiceName').value = btn.dataset.name || '';
-    document.getElementById('editServiceFee').value = btn.dataset.fee || '';
+    document.getElementById('editServiceFee').value = serviceFeeToCents(btn.dataset.fee);
     document.getElementById('editServiceDescription').value = btn.dataset.description || btn.dataset.shortDesc || '';
     openModal('modal-add-service');
 }
+document.getElementById('editServiceFee')?.addEventListener('input', function () {
+    formatServiceFeeInput(this);
+});
 </script>
 HTML;
+    $doctorServiceOptions = array_map(
+        fn($service) => ['id' => (int)($service['service_id'] ?? 0), 'name' => (string)($service['service_name'] ?? '')],
+        get_services($conn)
+    );
+    echo '<script>
+    window.quickcareDoctorServices = ' . json_encode($doctorServiceOptions, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) . ';
+    function renderDoctorServiceOptions() {
+        const container = document.getElementById("doctorServicesContainer");
+        if (!container || container.dataset.ready === "1") return;
+        container.dataset.ready = "1";
+        container.innerHTML = "";
+        (window.quickcareDoctorServices || []).forEach(function (service) {
+            const label = document.createElement("label");
+            label.style.fontWeight = "400";
+            label.style.fontSize = "0.85rem";
+            label.style.display = "flex";
+            label.style.alignItems = "center";
+            label.style.gap = "8px";
+            label.innerHTML = "<input type=\"checkbox\" name=\"service_ids[]\" value=\"" + service.id + "\"> <span></span>";
+            label.querySelector("span").textContent = service.name;
+            container.appendChild(label);
+        });
+    }
+    function resetDoctorServiceInputs() {
+        renderDoctorServiceOptions();
+        document.querySelectorAll("#doctorServicesContainer input[type=\"checkbox\"]").forEach(function (cb) {
+            cb.checked = false;
+        });
+    }
+    function applyDoctorServiceData(serviceIds) {
+        resetDoctorServiceInputs();
+        const selected = (serviceIds || "").split(",").filter(Boolean);
+        document.querySelectorAll("#doctorServicesContainer input[type=\"checkbox\"]").forEach(function (cb) {
+            cb.checked = selected.includes(cb.value);
+        });
+    }
+    renderDoctorServiceOptions();
+    </script>';
+    echo '<div class="modal-overlay" id="modal-avatar-preview"><div class="modal avatar-preview-modal"><div class="modal-header"><span class="modal-title" id="avatarPreviewTitle">Avatar</span><button class="modal-close" onclick="closeModal(\'modal-avatar-preview\')">&times;</button></div><div class="modal-body"><div class="avatar-preview-content" id="avatarPreviewContent"></div></div></div></div>';
+    echo '<script>
+    function openAvatarPreview(url, initials, title) {
+        const titleEl = document.getElementById("avatarPreviewTitle");
+        const content = document.getElementById("avatarPreviewContent");
+        if (!content) return;
+        content.innerHTML = "";
+        if (titleEl) titleEl.textContent = title || "Avatar";
+
+        if (url) {
+            const img = document.createElement("img");
+            img.className = "avatar-preview-image";
+            img.src = url;
+            img.alt = title || "Avatar preview";
+            content.appendChild(img);
+        } else {
+            const fallback = document.createElement("div");
+            fallback.className = "avatar-preview-initials";
+            fallback.textContent = initials || "?";
+            content.appendChild(fallback);
+        }
+        openModal("modal-avatar-preview");
+    }
+    function openAvatarPreviewFromTrigger(trigger) {
+        openAvatarPreview(
+            trigger?.dataset?.avatarUrl || "",
+            trigger?.dataset?.avatarInitials || trigger?.textContent?.trim() || "",
+            trigger?.dataset?.avatarTitle || "Avatar"
+        );
+    }
+    document.addEventListener("DOMContentLoaded", function () {
+        const profileAvatar = document.querySelector(".profile-header .profile-avatar-lg");
+        if (!profileAvatar) return;
+        profileAvatar.classList.add("avatar-preview-clickable");
+        profileAvatar.setAttribute("role", "button");
+        profileAvatar.setAttribute("tabindex", "0");
+        const profileImg = profileAvatar.querySelector("img");
+        profileAvatar.dataset.avatarUrl = profileImg ? profileImg.src : "";
+        profileAvatar.dataset.avatarInitials = profileAvatar.textContent.trim();
+        profileAvatar.dataset.avatarTitle = "Profile Avatar";
+        profileAvatar.addEventListener("click", function () {
+            openAvatarPreviewFromTrigger(profileAvatar);
+        });
+        profileAvatar.addEventListener("keydown", function (event) {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                openAvatarPreviewFromTrigger(profileAvatar);
+            }
+        });
+    });
+    </script>';
     echo '<div class="modal-overlay" id="modal-edit-profile" data-static-modal="true"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Profile</span><button class="modal-close" onclick="closeModal(\'modal-edit-profile\')">✕</button></div><form method="post" action="' . e(app_url('action.php')) . '" enctype="multipart/form-data"><input type="hidden" name="action" value="save_profile"><div class="modal-body">';
     echo '<div class="profile-upload-area"><label class="profile-upload-avatar" for="profileImage">' . user_avatar_html($user, 'profile-avatar-lg') . '<span>Change</span></label><input class="profile-file-input" id="profileImage" type="file" name="profile_image" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted profile-upload-note">Upload a square JPG, PNG, or WEBP image. Maximum file size is 2MB.</p>';
     if (!empty($user['profile_image'])) {
