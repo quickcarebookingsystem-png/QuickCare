@@ -301,6 +301,70 @@ function name_avatar($name) {
     return strtoupper(substr($parts[0], 0, 1) . substr($parts[1], 0, 1));
 }
 
+function user_avatar_html($user, $class = 'user-avatar') {
+    $image = trim((string)($user['profile_image'] ?? ''));
+    if ($image !== '') {
+        return '<div class="' . e($class) . ' profile-avatar-image"><img src="' . e(app_url('uploads/avatars/' . rawurlencode($image))) . '" alt="Profile avatar"></div>';
+    }
+
+    return '<div class="' . e($class) . '">' . e(name_avatar($user['name'] ?? '')) . '</div>';
+}
+
+function ensure_profile_image_column($conn) {
+    $columnCheck = $conn->query("SHOW COLUMNS FROM users LIKE 'profile_image'");
+    if ($columnCheck && $columnCheck->num_rows > 0) {
+        return true;
+    }
+
+    return (bool) $conn->query("ALTER TABLE users ADD COLUMN profile_image VARCHAR(255) NULL");
+}
+
+function ensure_doctor_image_column($conn) {
+    $columnCheck = $conn->query("SHOW COLUMNS FROM doctors LIKE 'doctor_image'");
+    if ($columnCheck && $columnCheck->num_rows > 0) {
+        return true;
+    }
+
+    return (bool) $conn->query("ALTER TABLE doctors ADD COLUMN doctor_image VARCHAR(255) NULL");
+}
+
+function doctor_avatar_html($doctor, $class = 'doctor-avatar') {
+    $image = trim((string)($doctor['doctor_image'] ?? ''));
+    if ($image !== '') {
+        return '<div class="' . e($class) . ' doctor-avatar-image"><img src="' . e(app_url('uploads/doctors/' . rawurlencode($image))) . '" alt="' . e($doctor['doctor_name'] ?? 'Doctor') . '"></div>';
+    }
+
+    return '<div class="' . e($class) . '">' . e(name_avatar($doctor['doctor_name'] ?? 'Doctor')) . '</div>';
+}
+
+function appointment_cancel_reason($notes) {
+    $notes = (string) $notes;
+    if (preg_match('/Cancellation reason:\s*(.+)$/is', $notes, $matches)) {
+        return trim($matches[1]);
+    }
+
+    return '';
+}
+
+function appointment_booking_notes($notes) {
+    $notes = (string) $notes;
+    $parts = preg_split('/\R*\s*Cancellation reason:\s*/i', $notes, 2);
+    return trim($parts[0] ?? '');
+}
+
+function appointment_payment_notes($appointment) {
+    $paymentNote = payment_note_display(
+        $appointment['latest_payment_status'] ?? $appointment['payment_status'] ?? '',
+        $appointment['latest_payment_remarks'] ?? ''
+    );
+
+    return trim((string)($paymentNote['text'] ?? ''));
+}
+
+function appointment_refund_receipt_file($appointment) {
+    return payment_refund_receipt_file($appointment['latest_payment_remarks'] ?? '');
+}
+
 function format_phone_number($phone) {
     $digits = preg_replace('/\D+/', '', (string) $phone);
     if ($digits === '') {
@@ -375,13 +439,14 @@ function get_services($conn) {
 }
 
 function get_doctors($conn) {
+    ensure_doctor_image_column($conn);
     return fetch_all_assoc(
         $conn,
-        "SELECT d.doctor_id, d.doctor_icon, d.doctor_name, d.doctor_specialist,
+        "SELECT d.doctor_id, d.doctor_image, d.doctor_name, d.doctor_specialist,
                 GROUP_CONCAT(DISTINCT ds.available_day ORDER BY FIELD(ds.available_day, 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun') SEPARATOR ', ') AS available_days
          FROM doctors d
          LEFT JOIN doctor_schedule ds ON ds.doctor_id = d.doctor_id
-         GROUP BY d.doctor_id, d.doctor_icon, d.doctor_name, d.doctor_specialist
+         GROUP BY d.doctor_id, d.doctor_image, d.doctor_name, d.doctor_specialist
          ORDER BY d.doctor_id ASC"
     );
 }
@@ -400,10 +465,24 @@ function get_appointments($conn, $role = null, $appointmentDate = null, $limit =
                        SELECT p.payment_id
                        FROM payments p
                        WHERE p.appointment_code = appointments.appointment_code
-                         AND p.payment_status IN ('paid', 'approved')
+                         AND p.payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected')
                        ORDER BY p.approved_date DESC, p.payment_date DESC, p.payment_id DESC
                        LIMIT 1
-                   ) AS receipt_payment_id
+                   ) AS receipt_payment_id,
+                   (
+                       SELECT p.payment_status
+                       FROM payments p
+                       WHERE p.appointment_code = appointments.appointment_code
+                       ORDER BY p.payment_date DESC, p.payment_id DESC
+                       LIMIT 1
+                   ) AS latest_payment_status,
+                   (
+                       SELECT p.remarks
+                       FROM payments p
+                       WHERE p.appointment_code = appointments.appointment_code
+                       ORDER BY p.payment_date DESC, p.payment_id DESC
+                       LIMIT 1
+                   ) AS latest_payment_remarks
             FROM appointments";
     $types = '';
     $params = [];
@@ -486,7 +565,7 @@ function app_start($role, $page, $title = null) {
     echo '<span class="text-muted text-sm">' . date('l, F j, Y') . '</span></div></div><div class="page-content">';
     if (!empty($_SESSION['QuickCare_message'])) {
         $messageType = $_SESSION['QuickCare_message_type'] ?? 'success';
-        echo '<div class="toast show ' . e($messageType) . '" style="position:static;margin-bottom:16px">' . e($_SESSION['QuickCare_message']) . '</div>';
+        echo '<div class="toast flash-message show ' . e($messageType) . '">' . e($_SESSION['QuickCare_message']) . '</div>';
         unset($_SESSION['QuickCare_message']);
         unset($_SESSION['QuickCare_message_type']);
     }
@@ -504,6 +583,16 @@ function app_end() {
         if (event.persisted) {
             window.location.reload();
         }
+    });
+    document.addEventListener("DOMContentLoaded", function () {
+        document.querySelectorAll(".flash-message").forEach(function (message) {
+            window.setTimeout(function () {
+                message.classList.add("hiding");
+                window.setTimeout(function () {
+                    message.remove();
+                }, 350);
+            }, 5000);
+        });
     });
     </script>
 
@@ -558,11 +647,20 @@ function render_dashboard($role) {
             $paymentProofLink = $paymentProof !== '' ? app_url('uploads/receipts/' . rawurlencode($paymentProof)) : page_url('payment_history', $role);
             $paymentProofExt = strtolower(pathinfo($paymentProof, PATHINFO_EXTENSION));
             $receiptPaymentId = (int)($a['receipt_payment_id'] ?? 0);
+            $refundReceipt = appointment_refund_receipt_file($a);
+            $refundProofLink = $refundReceipt !== '' ? app_url('uploads/receipts/' . rawurlencode($refundReceipt)) : '';
+            $refundProofExt = strtolower(pathinfo($refundReceipt, PATHINFO_EXTENSION));
             $payUrl = page_url('payment', $role) . '?appointment=' . urlencode($a['appointment_code']);
-            $actionData = $role === 'user'
-                ? '" data-pay-url="' . e($payUrl) . '" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '" data-receipt-id="' . e($receiptPaymentId)
-                : '';
-            echo '<tr><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e(format_date_display($a['appointment_date'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td><button type="button" class="btn btn-sm btn-outline dashboard-view-btn" onclick="showAppointmentDetails(this)" data-code="' . e($a['appointment_code']) . '" data-patient="' . e($a['name']) . '" data-doctor="' . e($a['doctor_name']) . '" data-service="' . e($a['service_name']) . '" data-date="' . e(format_date_display($a['appointment_date'])) . '" data-time="' . e(format_time_display($a['appointment_time'])) . '" data-notes="' . e($a['notes'] ?? '') . '" data-status="' . e($a['appointment_status']) . '" data-payment="' . e($a['payment_status']) . '" data-amount="RM ' . e(number_format((float) $a['amount'], 2)) . $actionData . '">View</button></td></tr>';
+            $actionData = '';
+            if ($role === 'user') {
+                $actionData = '" data-pay-url="' . e($payUrl) . '" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '" data-receipt-id="' . e($receiptPaymentId) . '" data-refund-proof-url="' . e($refundProofLink) . '" data-refund-proof-ext="' . e($refundProofExt);
+            } elseif (in_array($role, ['admin', 'staff'], true)) {
+                $canComplete = in_array($a['appointment_status'] ?? '', ['confirm', 'confirmed'], true);
+                if ($canComplete) {
+                    $actionData = '" data-complete-url="' . e(action_url('update_status', ['id' => $a['appointment_code']]));
+                }
+            }
+            echo '<tr><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e(format_date_display($a['appointment_date'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td><button type="button" class="btn btn-sm btn-outline dashboard-view-btn" onclick="showAppointmentDetails(this)" data-code="' . e($a['appointment_code']) . '" data-patient="' . e($a['name']) . '" data-doctor="' . e($a['doctor_name']) . '" data-service="' . e($a['service_name']) . '" data-date="' . e(format_date_display($a['appointment_date'])) . '" data-time="' . e(format_time_display($a['appointment_time'])) . '" data-notes="' . e(appointment_booking_notes($a['notes'] ?? '')) . '" data-cancel-reason="' . e(appointment_cancel_reason($a['notes'] ?? '')) . '" data-payment-notes="' . e(appointment_payment_notes($a)) . '" data-status="' . e($a['appointment_status']) . '" data-payment="' . e($a['payment_status']) . '" data-amount="RM ' . e(number_format((float) $a['amount'], 2)) . $actionData . '">View</button></td></tr>';
         }
     }
     echo '</tbody></table></div></div></div></div><div><div class="card mb-20">';
@@ -600,9 +698,9 @@ function render_dashboard($role) {
     ];
     foreach ($actions[$role] ?? [] as $a) echo '<a class="btn btn-outline w-full" href="' . e(page_url($a[1], $role)) . '">' . e($a[0]) . '</a>';
     echo '</div></div></div></div></div>';
-    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div></div><div class="modal-footer"><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button><button type="button" class="btn btn-primary appointment-detail-close" onclick="closeModal(\'modal-appointment-details\')">Close</button></div></div></div>';
+    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div><div class="appointment-detail-actions"><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button></div></div></div></div>';
     if ($role === 'user') {
-        echo '<div class="modal-overlay" id="modal-dashboard-payment-proof"><div class="modal payment-proof-modal"><div class="modal-header"><span class="modal-title">Payment Proof</span><button class="modal-close" onclick="closeModal(\'modal-dashboard-payment-proof\')">×</button></div><div class="modal-body"><div class="payment-proof-card" id="dashboardPaymentProofContent"></div></div><div class="modal-footer"><button type="button" class="btn btn-primary" style="width:auto" onclick="closeModal(\'modal-dashboard-payment-proof\')">Close</button></div></div></div>';
+        echo '<div class="modal-overlay" id="modal-dashboard-payment-proof"><div class="modal payment-proof-modal"><div class="modal-header"><span class="modal-title">Payment Proof</span><button class="modal-close" onclick="closeModal(\'modal-dashboard-payment-proof\')">×</button></div><div class="modal-body"><div class="payment-proof-card" id="dashboardPaymentProofContent"></div></div></div></div>';
         echo '<div class="modal-overlay" id="modal-dashboard-receipt"><div class="modal receipt-modal"><div class="modal-header"><span class="modal-title">Payment Receipt</span><button class="modal-close" onclick="closeModal(\'modal-dashboard-receipt\')">×</button></div><div class="modal-body" id="dashboardReceiptContent"></div><div class="modal-footer"><button class="btn btn-primary" style="width:auto" onclick="window.print()">Print</button><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-dashboard-receipt\')">Close</button></div></div></div>';
     }
     echo '<script>
@@ -624,23 +722,28 @@ function render_dashboard($role) {
     function setDetailPaymentAction(button) {
         const action = document.getElementById("detailPaymentAction");
         if (!action) return;
-
         const status = button.dataset.status || "";
         const payment = button.dataset.payment || "";
-        if (status === "cancelled") {
+        const isCancelled = status === "cancelled";
+        if (!button.dataset.payUrl && !button.dataset.proofUrl && !button.dataset.receiptId && !button.dataset.refundProofUrl && !button.dataset.completeUrl) {
             action.style.display = "none";
             action.onclick = null;
             return;
         }
 
-        action.style.display = "inline-flex";
-        action.className = "btn btn-outline";
+        action.style.display = "none";
+        action.onclick = null;
+        action.className = "btn btn-primary";
         action.style.width = "auto";
 
-        if (payment === "pending") {
+        if (button.dataset.completeUrl) {
+            action.textContent = "Complete Appointment";
+            action.className = "btn btn-teal";
+            action.onclick = function () { window.location.href = button.dataset.completeUrl; };
+        } else if (!isCancelled && payment === "pending") {
             action.textContent = "Pay";
             action.onclick = function () { window.location.href = button.dataset.payUrl || ""; };
-        } else if (payment === "rejected") {
+        } else if (!isCancelled && payment === "rejected") {
             action.textContent = "Retry Payment";
             action.onclick = function () { window.location.href = button.dataset.payUrl || ""; };
         } else if (payment === "verifying") {
@@ -648,15 +751,21 @@ function render_dashboard($role) {
             action.onclick = function () {
                 openDashboardPaymentProof(button.dataset.proofUrl || "", button.dataset.proofExt || "");
             };
-        } else if (payment === "paid") {
+        } else if (["paid", "refund_requested", "refund_rejected"].includes(payment)) {
             action.textContent = "View Receipt";
             action.onclick = function () {
                 printDashboardReceipt(Number(button.dataset.receiptId || 0));
+            };
+        } else if (payment === "refunded") {
+            action.textContent = "View Refund Proof";
+            action.onclick = function () {
+                openDashboardPaymentProof(button.dataset.refundProofUrl || "", button.dataset.refundProofExt || "", "Refund Proof");
             };
         } else {
             action.style.display = "none";
             action.onclick = null;
         }
+        if (action.onclick) action.style.display = "inline-flex";
     }
     function showAppointmentDetails(button) {
         document.getElementById("detailAppointmentCode").textContent = button.dataset.code || "";
@@ -666,22 +775,46 @@ function render_dashboard($role) {
         document.getElementById("detailDate").textContent = button.dataset.date || "";
         document.getElementById("detailTime").textContent = button.dataset.time || "";
         document.getElementById("detailNotes").textContent = trimDetailNotes(button.dataset.notes);
+        const cancelReason = (button.dataset.cancelReason || "").trim();
+        let cancelWrap = document.getElementById("detailCancelReasonWrap");
+        if (!cancelWrap) {
+            cancelWrap = document.createElement("div");
+            cancelWrap.className = "appointment-detail-notes";
+            cancelWrap.id = "detailCancelReasonWrap";
+            cancelWrap.innerHTML = "<span>Cancel Reason</span><strong id=\"detailCancelReason\"></strong>";
+            document.getElementById("detailNotes").closest(".appointment-detail-notes").after(cancelWrap);
+        }
+        document.getElementById("detailCancelReason").textContent = cancelReason;
+        cancelWrap.style.display = cancelReason ? "" : "none";
+        const paymentNotes = (button.dataset.paymentNotes || "").trim();
+        let paymentNotesWrap = document.getElementById("detailPaymentNotesWrap");
+        if (!paymentNotesWrap) {
+            paymentNotesWrap = document.createElement("div");
+            paymentNotesWrap.className = "appointment-detail-notes";
+            paymentNotesWrap.id = "detailPaymentNotesWrap";
+            paymentNotesWrap.innerHTML = "<span>Payment Remarks</span><strong id=\"detailPaymentNotes\"></strong>";
+            cancelWrap.after(paymentNotesWrap);
+        }
+        document.getElementById("detailPaymentNotes").textContent = paymentNotes;
+        paymentNotesWrap.style.display = paymentNotes ? "" : "none";
         document.getElementById("detailAmount").textContent = button.dataset.amount || "";
         setDetailBadge("detailStatus", button.dataset.status || "");
         setDetailBadge("detailPayment", button.dataset.payment || "");
         setDetailPaymentAction(button);
         openModal("modal-appointment-details");
     }
-    function openDashboardPaymentProof(proofUrl, proofExt) {
+    function openDashboardPaymentProof(proofUrl, proofExt, title) {
         const content = document.getElementById("dashboardPaymentProofContent");
         if (!content) return;
+        const modalTitle = document.querySelector("#modal-dashboard-payment-proof .modal-title");
+        if (modalTitle) modalTitle.textContent = title || "Payment Proof";
         proofExt = (proofExt || "").toLowerCase();
         if (!proofUrl) {
             content.innerHTML = "<p class=\"text-muted text-center\">No payment proof uploaded.</p>";
         } else if (["jpg", "jpeg", "png", "gif", "webp"].includes(proofExt)) {
             content.innerHTML = "<img src=\"" + proofUrl + "\" alt=\"Payment proof\">";
         } else {
-            content.innerHTML = "<p class=\"text-muted text-center mb-16\">This payment proof file cannot be previewed here.</p><a class=\"btn btn-outline\" style=\"width:auto\" target=\"_blank\" rel=\"noopener\" href=\"" + proofUrl + "\">Open File</a>";
+            content.innerHTML = "<div class=\"file-open-fallback\"><p>This payment proof file cannot be previewed here.</p><a class=\"btn btn-outline\" target=\"_blank\" rel=\"noopener\" href=\"" + proofUrl + "\">Open File</a></div>";
         }
         openModal("modal-dashboard-payment-proof");
     }
@@ -722,7 +855,7 @@ function render_sidebar($conn, $role, $page) {
         }
         echo '</div>';
     }
-    echo '</nav><div class="sidebar-footer"><div class="user-info"><div class="user-avatar">' . e(name_avatar($user['name'] ?? '')) . '</div><div>';
+    echo '</nav><div class="sidebar-footer"><div class="user-info">' . user_avatar_html($user, 'user-avatar') . '<div>';
     echo '<div class="user-name">' . e($user['name']) . '</div><div class="user-email">' . e($user['email']) . '</div></div></div>';
     echo '<a class="btn-signout" href="' . e(action_url('logout')) . '" draggable = "false">🚪 Log Out</a></div></aside>';
 }
@@ -735,21 +868,20 @@ function render_stats($role) {
     $pendingPayments = count_appointments($conn, 'user', ["payment_status = ?"], 's', ['pending']);
 
     $todayAppointments = count_appointments($conn, null, ["appointment_date = CURDATE()", "appointment_status <> ?"], 's', ['cancelled']);
-    $pendingReview = count_appointments($conn, null, ["appointment_status IN ('pending', 'confirm', 'confirmed')"]);
     $confirmed = count_appointments($conn, null, ["appointment_status = ?"], 's', ['confirmed']);
     $totalUsers = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ?", 's', ['user'])[0]['total'] ?? 0);
 
     $totalAppointments = count_appointments($conn);
-    $pendingApprovalRows = fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM payments WHERE payment_status IN ('verifying', 'pending', 'refund_requested')");
-    $pendingApprovals = (int) ($pendingApprovalRows[0]['total'] ?? 0);
+    $verifyingPaymentRows = fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM payments WHERE payment_status = ?", 's', ['verifying']);
+    $verifyingPayments = (int) ($verifyingPaymentRows[0]['total'] ?? 0);
     $revenueRows = fetch_all_assoc($conn, "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_status = ?", 's', ['paid']);
     $totalRevenue = (float) ($revenueRows[0]['total'] ?? 0);
     $totalActiveUsers = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ? AND user_status = ?", 'ss', ['user', 'active'])[0]['total'] ?? 0);
 
     $stats = [
         'user' => [['📅','primary',$upcomingAppointments,'Upcoming Appointments',''], ['✅','success',$completedAppointments,'Completed',''], ['⏳','warning',$pendingPayments,'Pending Payment','']],
-        'staff' => [['📅','primary',$todayAppointments,"Today's Appointments",''], ['⏳','warning',$pendingReview,'Pending Review',''], ['✅','success',$confirmed,'Confirmed',''], ['👥','teal',$totalUsers,'Total Users','']],
-        'admin' => [['📅','primary',$totalAppointments,'Total Appointments',''], ['💰','success','RM ' . number_format($totalRevenue, 2),'Revenue',''], ['👥','teal',$totalActiveUsers,'Active Users',''], ['⏳','warning',$pendingApprovals,'Pending Approvals','']],
+        'staff' => [['📅','primary',$todayAppointments,"Today's Appointments",''], ['✅','success',$confirmed,'Confirmed',''], ['👥','teal',$totalUsers,'Total Users','']],
+        'admin' => [['📅','primary',$totalAppointments,'Total Appointments',''], ['💰','success','RM ' . number_format($totalRevenue, 2),'Revenue',''], ['👥','teal',$totalActiveUsers,'Active Users',''], ['⏳','warning',$verifyingPayments,'Payment Verifying','']],
     ];
     echo '<div class="stats-grid">';
     foreach ($stats[$role] ?? [] as $s) {
@@ -787,21 +919,38 @@ function payment_note_display($status, $remarks) {
     $lines = array_values(array_filter(array_map('trim', $lines), fn($line) => $line !== ''));
 
     if (in_array($status, ['refund_requested', 'refunded', 'refund_rejected'], true)) {
-        $refundLines = array_values(array_filter($lines, function($line) use ($status) {
-            if (stripos($line, 'Refunded:') === 0) {
-                return false;
+        $refundReason = '';
+        $rejectReason = '';
+
+        foreach ($lines as $line) {
+            if (stripos($line, 'Refund requested:') === 0) {
+                $refundReason = trim(substr($line, strlen('Refund requested:')));
+            } elseif (stripos($line, 'Refund request rejected:') === 0) {
+                $rejectReason = trim(substr($line, strlen('Refund request rejected:')));
             }
-            if ($status === 'refunded') {
-                return stripos($line, 'Refund requested:') === 0;
-            }
-            return stripos($line, 'Refund requested:') === 0 || stripos($line, 'Refund request rejected:') === 0;
-        }));
+        }
+
+        $refundLines = [];
+        if ($refundReason !== '') {
+            $refundLines[] = 'Request Reason: ' . $refundReason;
+        }
+        if ($status === 'refund_rejected' && $rejectReason !== '') {
+            $refundLines[] = 'Reject Reason: ' . $rejectReason;
+        }
 
         return [
-            'label' => 'Refund Notes:',
+            'label' => 'Refund Details:',
             'text' => implode("\n", $refundLines),
             'is_refund' => true,
         ];
+    }
+
+    if ($status === 'rejected') {
+        $rejectedLines = array_values(array_filter($lines, fn($line) => stripos($line, 'Rejected:') === 0));
+        $reasonLine = $rejectedLines ? end($rejectedLines) : $remarks;
+        $reason = preg_replace('/^Rejected:\s*/i', '', $reasonLine);
+
+        return ['label' => 'Remarks:', 'text' => 'Reject Reason: ' . trim($reason), 'is_refund' => false];
     }
 
     return ['label' => 'Remarks:', 'text' => $remarks, 'is_refund' => false];
@@ -819,10 +968,6 @@ function payment_refund_receipt_file($remarks) {
 }
 
 function appointment_badge($status, $role = null) {
-    if (in_array($role, ['staff', 'admin'], true) && in_array($status, ['confirm', 'confirmed'], true)) {
-        return badge('pending');
-    }
-
     return badge($status);
 }
 
@@ -833,7 +978,7 @@ function render_profile($role) {
         redirect_to(app_url('login.php'));
     }
     $accountStatus = strtolower((string)($u['user_status'] ?? 'inactive')) === 'active' ? 'active' : 'inactive';
-    echo '<div class="profile-header"><div class="profile-avatar-lg">' . e(name_avatar($u['name'] ?? '')) . '</div><div><div class="profile-name">' . e($u['name']) . '</div><div class="profile-meta">' . e($u['role'] . ' · ID: ' . $u['user_code']) . '</div><div style="margin-top:8px"><span class="badge badge-' . e($accountStatus) . '">• ' . e(ucfirst($accountStatus)) . '</span></div></div><button class="btn btn-outline" style="margin-left:auto" onclick="openModal(\'modal-edit-profile\')">✏️ Edit Profile</button></div>';
+    echo '<div class="profile-header">' . user_avatar_html($u, 'profile-avatar-lg') . '<div><div class="profile-name">' . e($u['name']) . '</div><div class="profile-meta">' . e($u['role'] . ' · ID: ' . $u['user_code']) . '</div><div style="margin-top:8px"><span class="badge badge-' . e($accountStatus) . '">• ' . e(ucfirst($accountStatus)) . '</span></div></div><button class="btn btn-outline" style="margin-left:auto" onclick="openModal(\'modal-edit-profile\')">✏️ Edit Profile</button></div>';
     echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Personal Information</span></div><div class="card-body"><div style="display:flex;flex-direction:column;gap:12px">';
     foreach ([['Full Name',$u['name']], ['Email',$u['email']], ['Phone',format_phone_number($u['phone_number'])], ['Gender',$u['gender']], ['Date of Birth',$u['date_of_birth']], ['Blood Type',$u['blood_type']]] as $row) echo '<div class="flex-between"><span class="text-muted">' . e($row[0]) . '</span><span>' . e($row[1]) . '</span></div><div class="divider"></div>';
     echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Change Password</span></div><div class="card-body"><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="change_password"><div class="form-group"><label>Current Password</label><input class="form-control" type="password" name="current_password" required></div><div class="form-group"><label>New Password</label><input class="form-control" type="password" name="new_password" required></div><div class="form-group"><label>Confirm Password</label><input class="form-control" type="password" name="confirm_password" required></div><button class="btn btn-primary" style="width:auto">Update Password</button></form></div></div></div>';
@@ -930,7 +1075,7 @@ function render_doctors($role, $showToolbar = true) {
     $doctors = get_doctors($conn);
     if ($showToolbar) {
         echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search doctors…" id="searchDoctorInput"></div>';
-        if ($role === 'admin') echo '<button class="btn btn-primary" style="width:auto" onclick="openModal(\'modal-add-doctor\')">+ Add Doctor</button>';
+        if ($role === 'admin') echo '<button class="btn btn-primary" style="width:auto" onclick="openAddDoctorModal()">+ Add Doctor</button>';
         echo '</div>';
     }
     echo '<div class="doctor-grid" id="doctorsGrid">';
@@ -949,11 +1094,12 @@ function render_doctors($role, $showToolbar = true) {
 
         echo '<div class="doctor-card" style="cursor:pointer" onclick="showDoctorDetails(this)" 
                    data-name="' . e($d['doctor_name']) . '" 
-                   data-icon="' . e($d['doctor_icon']) . '" 
+                   data-initials="' . e(name_avatar($d['doctor_name'] ?? 'Doctor')) . '" 
+                   data-image="' . e($d['doctor_image'] ?? '') . '" 
                    data-spec="' . e($d['doctor_specialist']) . '" 
                    data-avail="Available ' . e($available) . '" 
                    data-desc="' . e($description) . '">
-                <div class="doctor-avatar">' . e($d['doctor_icon']) . '</div>
+                ' . doctor_avatar_html($d) . '
                 <div class="doctor-name">' . e($d['doctor_name']) . '</div>
                 <div class="doctor-spec">' . e($d['doctor_specialist']) . '</div>
                 <div class="doctor-avail">✅ Available ' . e($available) . '</div>';
@@ -986,7 +1132,14 @@ function render_doctors($role, $showToolbar = true) {
     if (typeof openModal !== "function") { window.openModal = function(id) { document.getElementById(id).classList.add("active"); }; }
     if (typeof closeModal !== "function") { window.closeModal = function(id) { document.getElementById(id).classList.remove("active"); }; }
     function showDoctorDetails(el) {
-        document.getElementById("doctorDetailAvatar").textContent = el.dataset.icon;
+        const avatar = document.getElementById("doctorDetailAvatar");
+        if (el.dataset.image) {
+            avatar.classList.add("doctor-avatar-image");
+            avatar.innerHTML = "<img src=\"' . e(app_url('uploads/doctors/')) . '" + encodeURIComponent(el.dataset.image) + "\" alt=\"Doctor photo\">";
+        } else {
+            avatar.classList.remove("doctor-avatar-image");
+            avatar.textContent = el.dataset.initials;
+        }
         document.getElementById("doctorDetailName").textContent = el.dataset.name;
         document.getElementById("doctorDetailSpec").textContent = el.dataset.spec;
         document.getElementById("doctorDetailAvail").textContent = el.dataset.avail;
@@ -1071,40 +1224,74 @@ function appointment_actions($role, $a) {
     $appointmentId = $a['appointment_code'] ?? $a['id'] ?? '';
     $appointmentStatus = $a['appointment_status'] ?? '';
     $paymentStatus = $a['payment_status'] ?? '';
+    $paymentProof = trim($a['payment_proof'] ?? '');
+    $paymentProofLink = $paymentProof !== '' ? app_url('uploads/receipts/' . rawurlencode($paymentProof)) : '';
+    $paymentProofExt = strtolower(pathinfo($paymentProof, PATHINFO_EXTENSION));
+    $refundReceipt = appointment_refund_receipt_file($a);
+    $refundProofUrl = $refundReceipt !== '' ? app_url('uploads/receipts/' . rawurlencode($refundReceipt)) : '';
+    $refundProofExt = strtolower(pathinfo($refundReceipt, PATHINFO_EXTENSION));
+    $detailsAttrs = ' data-code="' . e($appointmentId) . '" data-patient="' . e($a['name'] ?? '') . '" data-doctor="' . e($a['doctor_name'] ?? '') . '" data-service="' . e($a['service_name'] ?? '') . '" data-date="' . e(format_date_display($a['appointment_date'] ?? '')) . '" data-time="' . e(format_time_display($a['appointment_time'] ?? '')) . '" data-notes="' . e(appointment_booking_notes($a['notes'] ?? '')) . '" data-cancel-reason="' . e(appointment_cancel_reason($a['notes'] ?? '')) . '" data-payment-notes="' . e(appointment_payment_notes($a)) . '" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '" data-refund-proof-url="' . e($refundProofUrl) . '" data-refund-proof-ext="' . e($refundProofExt) . '" data-status="' . e($appointmentStatus) . '" data-payment="' . e($paymentStatus) . '" data-amount="RM ' . e(number_format((float)($a['amount'] ?? 0), 2)) . '"';
+
+    if (in_array($role, ['admin', 'staff'], true)) {
+        $canComplete = in_array($appointmentStatus, ['confirm', 'confirmed'], true);
+        if ($canComplete) {
+            $detailsAttrs .= ' data-complete-url="' . e(action_url('update_status', ['id' => $appointmentId])) . '"';
+        }
+    }
+
     if ($role === 'user') {
-        $paymentProof = trim($a['payment_proof'] ?? '');
-        $paymentProofLink = $paymentProof !== '' ? app_url('uploads/receipts/' . rawurlencode($paymentProof)) : page_url('payment_history', $role);
-        $paymentProofExt = strtolower(pathinfo($paymentProof, PATHINFO_EXTENSION));
+        $paymentProofLink = $paymentProofLink !== '' ? $paymentProofLink : page_url('payment_history', $role);
         $receiptPaymentId = (int)($a['receipt_payment_id'] ?? 0);
         $payUrl = page_url('payment', $role) . '?appointment=' . urlencode($appointmentId);
-        $detailsAttrs = ' data-code="' . e($appointmentId) . '" data-patient="' . e($a['name'] ?? '') . '" data-doctor="' . e($a['doctor_name'] ?? '') . '" data-service="' . e($a['service_name'] ?? '') . '" data-date="' . e(format_date_display($a['appointment_date'] ?? '')) . '" data-time="' . e(format_time_display($a['appointment_time'] ?? '')) . '" data-notes="' . e($a['notes'] ?? '') . '" data-status="' . e($appointmentStatus) . '" data-payment="' . e($paymentStatus) . '" data-amount="RM ' . e(number_format((float)($a['amount'] ?? 0), 2)) . '" data-pay-url="' . e($payUrl) . '" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '" data-receipt-id="' . e($receiptPaymentId) . '"';
+        $detailsAttrs .= ' data-pay-url="' . e($payUrl) . '" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '" data-receipt-id="' . e($receiptPaymentId) . '"';
         $menuItems = [];
 
         if (in_array($appointmentStatus, ['completed', 'cancelled'], true)) {
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
+            if (in_array($paymentStatus, ['paid', 'approved', 'refund_requested', 'refund_rejected'], true) && $receiptPaymentId > 0) {
+                $menuItems[] = '<button type="button" class="appt-menu-item" onclick="printAppointmentReceipt(' . e($receiptPaymentId) . ')">View Receipt</button>';
+            }
+            if ($paymentStatus === 'refunded') {
+                $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openPaymentProofModal(this)" data-proof-url="' . e($refundProofUrl) . '" data-proof-ext="' . e($refundProofExt) . '" data-proof-title="Refund Proof">View Refund Proof</button>';
+            }
             if ($appointmentStatus === 'cancelled' && in_array($paymentStatus, ['paid', 'approved'], true) && $receiptPaymentId > 0) {
                 $menuItems[] = '<button type="button" class="appt-menu-item" onclick="requestAppointmentRefund(' . e($receiptPaymentId) . ')">Request Refund</button>';
             }
-            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
         } elseif (in_array($appointmentStatus, ['confirm', 'confirmed'], true) && $paymentStatus === 'pending') {
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
             $menuItems[] = '<a class="appt-menu-item" href="' . e($payUrl) . '">Pay</a>';
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openEditNotesModal(this)" data-code="' . e($appointmentId) . '" data-notes="' . e($a['notes'] ?? '') . '">Edit Notes</button>';
-            $menuItems[] = '<a class="appt-menu-item danger" href="' . e(action_url('cancel_appointment', ['id' => $appointmentId])) . '">Cancel</a>';
+            $menuItems[] = '<button type="button" class="appt-menu-item danger" onclick="openCancelAppointmentModal(this)" data-code="' . e($appointmentId) . '">Cancel</button>';
         } elseif (in_array($appointmentStatus, ['confirm', 'confirmed'], true) && $paymentStatus === 'rejected') {
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
             $menuItems[] = '<a class="appt-menu-item" href="' . e($payUrl) . '">Retry Payment</a>';
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openEditNotesModal(this)" data-code="' . e($appointmentId) . '" data-notes="' . e($a['notes'] ?? '') . '">Edit Notes</button>';
-            $menuItems[] = '<a class="appt-menu-item danger" href="' . e(action_url('cancel_appointment', ['id' => $appointmentId])) . '">Cancel</a>';
+            $menuItems[] = '<button type="button" class="appt-menu-item danger" onclick="openCancelAppointmentModal(this)" data-code="' . e($appointmentId) . '">Cancel</button>';
         } elseif (in_array($appointmentStatus, ['confirm', 'confirmed'], true) && $paymentStatus === 'verifying') {
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openPaymentProofModal(this)" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '">View Payment Proof</button>';
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openEditNotesModal(this)" data-code="' . e($appointmentId) . '" data-notes="' . e($a['notes'] ?? '') . '">Edit Notes</button>';
-            $menuItems[] = '<a class="appt-menu-item danger" href="' . e(action_url('cancel_appointment', ['id' => $appointmentId])) . '">Cancel</a>';
+            $menuItems[] = '<button type="button" class="appt-menu-item danger" onclick="openCancelAppointmentModal(this)" data-code="' . e($appointmentId) . '">Cancel</button>';
         } elseif (in_array($appointmentStatus, ['confirm', 'confirmed'], true) && $paymentStatus === 'paid') {
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="printAppointmentReceipt(' . e($receiptPaymentId) . ')">View Receipt</button>';
+            if ($receiptPaymentId > 0) {
+                $menuItems[] = '<button type="button" class="appt-menu-item" onclick="requestAppointmentRefund(' . e($receiptPaymentId) . ')">Request Refund</button>';
+            }
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openEditNotesModal(this)" data-code="' . e($appointmentId) . '" data-notes="' . e($a['notes'] ?? '') . '">Edit Notes</button>';
-            $menuItems[] = '<a class="appt-menu-item danger" href="' . e(action_url('cancel_appointment', ['id' => $appointmentId])) . '">Cancel</a>';
+            $menuItems[] = '<button type="button" class="appt-menu-item danger" onclick="openCancelAppointmentModal(this)" data-code="' . e($appointmentId) . '">Cancel</button>';
+        } elseif (in_array($appointmentStatus, ['confirm', 'confirmed'], true) && in_array($paymentStatus, ['refund_requested', 'refund_rejected'], true)) {
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
+            if ($receiptPaymentId > 0) {
+                $menuItems[] = '<button type="button" class="appt-menu-item" onclick="printAppointmentReceipt(' . e($receiptPaymentId) . ')">View Receipt</button>';
+            }
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openEditNotesModal(this)" data-code="' . e($appointmentId) . '" data-notes="' . e($a['notes'] ?? '') . '">Edit Notes</button>';
+            $menuItems[] = '<button type="button" class="appt-menu-item danger" onclick="openCancelAppointmentModal(this)" data-code="' . e($appointmentId) . '">Cancel</button>';
+        } elseif (in_array($appointmentStatus, ['confirm', 'confirmed'], true) && $paymentStatus === 'refunded') {
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openPaymentProofModal(this)" data-proof-url="' . e($refundProofUrl) . '" data-proof-ext="' . e($refundProofExt) . '" data-proof-title="Refund Proof">View Refund Proof</button>';
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openEditNotesModal(this)" data-code="' . e($appointmentId) . '" data-notes="' . e($a['notes'] ?? '') . '">Edit Notes</button>';
+            $menuItems[] = '<button type="button" class="appt-menu-item danger" onclick="openCancelAppointmentModal(this)" data-code="' . e($appointmentId) . '">Cancel</button>';
         } else {
             $menuItems[] = '<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>';
         }
@@ -1112,13 +1299,31 @@ function appointment_actions($role, $a) {
         return '<div class="appt-action-menu"><button type="button" class="appt-menu-trigger" onclick="toggleAppointmentMenu(event, this)" aria-label="Appointment actions">...</button><div class="appt-menu-list">' . implode('', $menuItems) . '</div></div>';
     }
     if (in_array($role, ['admin', 'staff'], true) && !in_array($appointmentStatus, ['completed', 'cancelled', 'rejected'], true)) {
-        $canComplete = appointment_time_has_passed($a['appointment_date'] ?? '', $a['appointment_time'] ?? '');
-        $completeAction = $canComplete
-            ? '<a class="btn btn-sm btn-teal" href="' . e(action_url('update_status', ['id' => $appointmentId])) . '">Complete</a>'
-            : '<span class="text-muted text-sm">-</span>';
-        return $completeAction . ' <a class="btn btn-sm btn-danger" href="' . e(action_url('cancel_appointment', ['id' => $appointmentId])) . '">Cancel</a>';
+        $canComplete = in_array($appointmentStatus, ['confirm', 'confirmed'], true);
+        $menuItems = ['<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>'];
+        if ($paymentProofLink !== '' && in_array($paymentStatus, ['verifying', 'paid', 'approved', 'refund_requested', 'refund_rejected'], true)) {
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openPaymentProofModal(this)" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '" data-proof-title="Payment Proof">View Payment Proof</button>';
+        }
+        if ($refundProofUrl !== '' && $paymentStatus === 'refunded') {
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openPaymentProofModal(this)" data-proof-url="' . e($refundProofUrl) . '" data-proof-ext="' . e($refundProofExt) . '" data-proof-title="Refund Proof">View Refund Proof</button>';
+        }
+        if ($canComplete) {
+            $menuItems[] = '<a class="appt-menu-item" href="' . e(action_url('update_status', ['id' => $appointmentId])) . '">Complete</a>';
+        }
+        $menuItems[] = '<button type="button" class="appt-menu-item danger" onclick="openCancelAppointmentModal(this)" data-code="' . e($appointmentId) . '">Cancel</button>';
+        return '<div class="appt-action-menu"><button type="button" class="appt-menu-trigger" onclick="toggleAppointmentMenu(event, this)" aria-label="Appointment actions">...</button><div class="appt-menu-list">' . implode('', $menuItems) . '</div></div>';
     }
-    return '<span class="text-muted text-sm">No actions</span>';
+    if (in_array($role, ['admin', 'staff'], true)) {
+        $menuItems = ['<button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button>'];
+        if ($paymentProofLink !== '' && in_array($paymentStatus, ['verifying', 'paid', 'approved', 'refund_requested', 'refund_rejected'], true)) {
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openPaymentProofModal(this)" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '" data-proof-title="Payment Proof">View Payment Proof</button>';
+        }
+        if ($refundProofUrl !== '' && $paymentStatus === 'refunded') {
+            $menuItems[] = '<button type="button" class="appt-menu-item" onclick="openPaymentProofModal(this)" data-proof-url="' . e($refundProofUrl) . '" data-proof-ext="' . e($refundProofExt) . '" data-proof-title="Refund Proof">View Refund Proof</button>';
+        }
+        return '<div class="appt-action-menu"><button type="button" class="appt-menu-trigger" onclick="toggleAppointmentMenu(event, this)" aria-label="Appointment actions">...</button><div class="appt-menu-list">' . implode('', $menuItems) . '</div></div>';
+    }
+    return '<div class="appt-action-menu"><button type="button" class="appt-menu-trigger" onclick="toggleAppointmentMenu(event, this)" aria-label="Appointment actions">...</button><div class="appt-menu-list"><button type="button" class="appt-menu-item" onclick="showAppointmentDetails(this)"' . $detailsAttrs . '>View Details</button></div></div>';
 }
 
 // ============================================
@@ -1129,23 +1334,37 @@ function render_appointments($role) {
     global $conn;
     $appointments = get_appointments($conn, $role, null, null, true);
 
-    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search appointments..." id="searchAppointment"></div><div class="filter-group"><input class="form-control" type="date" id="filterDate" style="width:160px"><select class="filter-select" id="filterStatus"><option value="">All Status</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="pending">Pending</option><option value="paid">Paid</option><option value="rejected">Rejected</option></select></div>';
-    echo '</div><div class="card"><div class="card-body" style="padding:0; overflow-x:auto"><table class="appointments-table" style="width:100%; border-collapse:collapse; min-width:900px"><thead><tr><th>ID</th><th>User</th><th>Doctor</th><th>Service</th><th>Date</th><th>Time</th><th>Status</th><th>Payment</th><th>Actions</th></tr></thead><tbody id="appointmentsTableBody">';
+    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control" type="text" placeholder="Search appointments..." id="searchAppointment"></div><div class="filter-group"><input class="form-control" type="date" id="filterDate" style="width:160px"><select class="filter-select" id="filterStatus"><option value="">All Status</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="pending">Pending</option><option value="unpaid">Unpaid</option><option value="verifying">Verifying</option><option value="paid">Paid</option><option value="rejected">Rejected</option><option value="refund_requested">Refund Requested</option><option value="refunded">Refunded</option><option value="refund_rejected">Refund Rejected</option></select></div>';
+    if ($role === 'user') {
+        echo '</div><div class="card"><div class="card-body" style="padding:0; overflow-x:auto"><table class="appointments-table" style="width:100%; border-collapse:collapse; min-width:900px"><thead><tr><th>ID</th><th>User</th><th>Doctor</th><th>Service</th><th>Date</th><th>Time</th><th>Status</th><th>Payment</th><th>Actions</th></tr></thead><tbody id="appointmentsTableBody">';
+    } else {
+        echo '</div><div class="card"><div class="card-body" style="padding:0; overflow-x:auto"><table class="appointments-table" style="width:100%; border-collapse:collapse; min-width:860px"><thead><tr><th>ID</th><th>User</th><th>Doctor</th><th>Date</th><th>Time</th><th>Status</th><th>Payment</th><th>Actions</th></tr></thead><tbody id="appointmentsTableBody">';
+    }
 
     if (empty($appointments)) {
-        echo '<tr><td colspan="9" style="text-align:center">No appointments found.</td></tr>';
+        echo '<tr><td colspan="' . ($role === 'user' ? '9' : '8') . '" style="text-align:center">No appointments found.</td></tr>';
     }
 
     foreach ($appointments as $a) {
-        echo '<tr><td>' . e($a['appointment_code']) . '</td><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e($a['service_name']) . '</td><td data-date="' . e($a['appointment_date']) . '">' . e(format_date_display($a['appointment_date'])) . '</td><td>' . e(format_time_display($a['appointment_time'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td class="appt-payment-status-cell">' . badge($a['payment_status']) . '</td><td class="appt-actions-cell">' . appointment_actions($role, $a) . '</td></tr>';
+        if ($role === 'user') {
+            echo '<tr data-appointment-status="' . e(strtolower((string)$a['appointment_status'])) . '" data-payment-status="' . e(strtolower((string)$a['payment_status'])) . '"><td>' . e($a['appointment_code']) . '</td><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e($a['service_name']) . '</td><td data-date="' . e($a['appointment_date']) . '">' . e(format_date_display($a['appointment_date'])) . '</td><td>' . e(format_time_display($a['appointment_time'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td class="appt-payment-status-cell">' . badge($a['payment_status']) . '</td><td class="appt-actions-cell">' . appointment_actions($role, $a) . '</td></tr>';
+        } else {
+            echo '<tr data-appointment-status="' . e(strtolower((string)$a['appointment_status'])) . '" data-payment-status="' . e(strtolower((string)$a['payment_status'])) . '"><td>' . e($a['appointment_code']) . '</td><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td data-date="' . e($a['appointment_date']) . '">' . e(format_date_display($a['appointment_date'])) . '</td><td>' . e(format_time_display($a['appointment_time'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td class="appt-payment-status-cell">' . badge($a['payment_status']) . '</td><td class="appt-actions-cell">' . appointment_actions($role, $a) . '</td></tr>';
+        }
     }
 
     echo '</tbody></table></div></div>';
+    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div><div class="appointment-detail-actions"><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button></div></div></div></div>';
     if ($role === 'user') {
-        echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div></div><div class="modal-footer"><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button><button type="button" class="btn btn-primary appointment-detail-close" onclick="closeModal(\'modal-appointment-details\')">Close</button></div></div></div>';
         echo '<div class="modal-overlay" id="modal-edit-notes"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Notes</span><button class="modal-close" onclick="closeModal(\'modal-edit-notes\')">×</button></div><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="save_appointment_notes"><input type="hidden" name="appointment_code" id="editNotesAppointmentCode"><div class="modal-body"><div class="form-group"><label for="editAppointmentNotes">Notes</label><textarea class="form-control" id="editAppointmentNotes" name="notes" rows="7"></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-edit-notes\')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>';
+        echo '<div class="modal-overlay" id="modal-cancel-appointment"><div class="modal"><div class="modal-header"><span class="modal-title">Cancel Appointment</span><button class="modal-close" onclick="closeModal(\'modal-cancel-appointment\')">×</button></div><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="cancel_appointment"><input type="hidden" name="id" id="cancelAppointmentCode"><div class="modal-body"><p class="text-muted mb-16">Are you sure you want to cancel this appointment?</p><div class="form-group"><label for="cancelAppointmentReason">Reason</label><textarea class="form-control" id="cancelAppointmentReason" name="reason" rows="4" placeholder="Please tell us why you are cancelling..." required></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-cancel-appointment\')">Keep Appointment</button><button class="btn btn-danger" style="width:auto">Cancel Appointment</button></div></form></div></div>';
+        echo '<div class="modal-overlay" id="modal-request-refund"><div class="modal"><div class="modal-header"><span class="modal-title">Request Refund</span><button class="modal-close" onclick="closeModal(\'modal-request-refund\')">×</button></div><form onsubmit="submitAppointmentRefund(event)"><input type="hidden" id="refundPaymentId"><div class="modal-body"><p class="text-muted mb-16">Please provide a reason for your refund request.</p><div class="form-group"><label for="refundAppointmentReason">Reason</label><textarea class="form-control" id="refundAppointmentReason" rows="4" placeholder="Please tell us why you are requesting a refund..." required></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-request-refund\')">Cancel</button><button class="btn btn-primary" style="width:auto">Request Refund</button></div></form></div></div>';
         echo '<div class="modal-overlay" id="modal-payment-proof"><div class="modal payment-proof-modal"><div class="modal-header"><span class="modal-title">Payment Proof</span><button class="modal-close" onclick="closeModal(\'modal-payment-proof\')">×</button></div><div class="modal-body"><div class="payment-proof-card" id="paymentProofContent"></div></div><div class="modal-footer"><button type="button" class="btn btn-primary" style="width:auto" onclick="closeModal(\'modal-payment-proof\')">Close</button></div></div></div>';
         echo '<div class="modal-overlay" id="modal-appointment-receipt"><div class="modal receipt-modal"><div class="modal-header"><span class="modal-title">Payment Receipt</span><button class="modal-close" onclick="closeModal(\'modal-appointment-receipt\')">×</button></div><div class="modal-body" id="appointmentReceiptContent"></div><div class="modal-footer"><button class="btn btn-primary" style="width:auto" onclick="window.print()">Print</button><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-appointment-receipt\')">Close</button></div></div></div>';
+    }
+    if ($role !== 'user') {
+        echo '<div class="modal-overlay" id="modal-cancel-appointment"><div class="modal"><div class="modal-header"><span class="modal-title">Cancel Appointment</span><button class="modal-close" onclick="closeModal(\'modal-cancel-appointment\')">×</button></div><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="cancel_appointment"><input type="hidden" name="id" id="cancelAppointmentCode"><div class="modal-body"><p class="text-muted mb-16">Are you sure you want to cancel this appointment?</p><div class="form-group"><label for="cancelAppointmentReason">Reason</label><textarea class="form-control" id="cancelAppointmentReason" name="reason" rows="4" placeholder="Please tell us why you are cancelling..." required></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-cancel-appointment\')">Keep Appointment</button><button class="btn btn-danger" style="width:auto">Cancel Appointment</button></div></form></div></div>';
+        echo '<div class="modal-overlay" id="modal-payment-proof"><div class="modal payment-proof-modal"><div class="modal-header"><span class="modal-title">Payment Proof</span><button class="modal-close" onclick="closeModal(\'modal-payment-proof\')">×</button></div><div class="modal-body"><div class="payment-proof-card" id="paymentProofContent"></div></div><div class="modal-footer"><button type="button" class="btn btn-primary" style="width:auto" onclick="closeModal(\'modal-payment-proof\')">Close</button></div></div></div>';
     }
     echo '<script>
     function formatStatusLabel(status) {
@@ -1167,23 +1386,28 @@ function render_appointments($role) {
     function setDetailPaymentAction(button) {
         const action = document.getElementById("detailPaymentAction");
         if (!action) return;
-
         const status = button.dataset.status || "";
         const payment = button.dataset.payment || "";
-        if (status === "cancelled") {
+        const isCancelled = status === "cancelled";
+        if (!button.dataset.payUrl && !button.dataset.proofUrl && !button.dataset.receiptId && !button.dataset.refundProofUrl && !button.dataset.completeUrl) {
             action.style.display = "none";
             action.onclick = null;
             return;
         }
 
-        action.style.display = "inline-flex";
-        action.className = "btn btn-outline";
+        action.style.display = "none";
+        action.onclick = null;
+        action.className = "btn btn-primary";
         action.style.width = "auto";
 
-        if (payment === "pending") {
+        if (button.dataset.completeUrl) {
+            action.textContent = "Complete Appointment";
+            action.className = "btn btn-teal";
+            action.onclick = function () { window.location.href = button.dataset.completeUrl; };
+        } else if (!isCancelled && payment === "pending") {
             action.textContent = "Pay";
             action.onclick = function () { window.location.href = button.dataset.payUrl || ""; };
-        } else if (payment === "rejected") {
+        } else if (!isCancelled && payment === "rejected") {
             action.textContent = "Retry Payment";
             action.onclick = function () { window.location.href = button.dataset.payUrl || ""; };
         } else if (payment === "verifying") {
@@ -1191,15 +1415,21 @@ function render_appointments($role) {
             action.onclick = function () {
                 openPaymentProof(button.dataset.proofUrl || "", button.dataset.proofExt || "");
             };
-        } else if (payment === "paid") {
+        } else if (["paid", "refund_requested", "refund_rejected"].includes(payment)) {
             action.textContent = "View Receipt";
             action.onclick = function () {
                 printAppointmentReceipt(Number(button.dataset.receiptId || 0));
+            };
+        } else if (payment === "refunded") {
+            action.textContent = "View Refund Proof";
+            action.onclick = function () {
+                openPaymentProof(button.dataset.refundProofUrl || "", button.dataset.refundProofExt || "", "Refund Proof");
             };
         } else {
             action.style.display = "none";
             action.onclick = null;
         }
+        if (action.onclick) action.style.display = "inline-flex";
     }
     function showAppointmentDetails(button) {
         document.getElementById("detailAppointmentCode").textContent = button.dataset.code || "";
@@ -1209,6 +1439,28 @@ function render_appointments($role) {
         document.getElementById("detailDate").textContent = button.dataset.date || "";
         document.getElementById("detailTime").textContent = button.dataset.time || "";
         document.getElementById("detailNotes").textContent = trimDetailNotes(button.dataset.notes);
+        const cancelReason = (button.dataset.cancelReason || "").trim();
+        let cancelWrap = document.getElementById("detailCancelReasonWrap");
+        if (!cancelWrap) {
+            cancelWrap = document.createElement("div");
+            cancelWrap.className = "appointment-detail-notes";
+            cancelWrap.id = "detailCancelReasonWrap";
+            cancelWrap.innerHTML = "<span>Cancel Reason</span><strong id=\"detailCancelReason\"></strong>";
+            document.getElementById("detailNotes").closest(".appointment-detail-notes").after(cancelWrap);
+        }
+        document.getElementById("detailCancelReason").textContent = cancelReason;
+        cancelWrap.style.display = cancelReason ? "" : "none";
+        const paymentNotes = (button.dataset.paymentNotes || "").trim();
+        let paymentNotesWrap = document.getElementById("detailPaymentNotesWrap");
+        if (!paymentNotesWrap) {
+            paymentNotesWrap = document.createElement("div");
+            paymentNotesWrap.className = "appointment-detail-notes";
+            paymentNotesWrap.id = "detailPaymentNotesWrap";
+            paymentNotesWrap.innerHTML = "<span>Payment Remarks</span><strong id=\"detailPaymentNotes\"></strong>";
+            cancelWrap.after(paymentNotesWrap);
+        }
+        document.getElementById("detailPaymentNotes").textContent = paymentNotes;
+        paymentNotesWrap.style.display = paymentNotes ? "" : "none";
         document.getElementById("detailAmount").textContent = button.dataset.amount || "";
         setDetailBadge("detailStatus", button.dataset.status || "");
         setDetailBadge("detailPayment", button.dataset.payment || "");
@@ -1220,21 +1472,53 @@ function render_appointments($role) {
         document.getElementById("editAppointmentNotes").value = button.dataset.notes || "";
         openModal("modal-edit-notes");
     }
-    function openPaymentProof(proofUrl, proofExt) {
+    function openCancelAppointmentModal(button) {
+        document.getElementById("cancelAppointmentCode").value = button.dataset.code || "";
+        document.getElementById("cancelAppointmentReason").value = "";
+        openModal("modal-cancel-appointment");
+    }
+    function openPaymentProof(proofUrl, proofExt, title) {
         proofExt = (proofExt || "").toLowerCase();
         const content = document.getElementById("paymentProofContent");
         if (!content) return;
+        const modalTitle = document.querySelector("#modal-payment-proof .modal-title");
+        if (modalTitle) modalTitle.textContent = title || "Payment Proof";
         if (!proofUrl) {
             content.innerHTML = "<p class=\"text-muted text-center\">No payment proof uploaded.</p>";
         } else if (["jpg", "jpeg", "png", "gif", "webp"].includes(proofExt)) {
             content.innerHTML = "<img src=\"" + proofUrl + "\" alt=\"Payment proof\">";
         } else {
-            content.innerHTML = "<p class=\"text-muted text-center mb-16\">This payment proof file cannot be previewed here.</p><a class=\"btn btn-outline\" style=\"width:auto\" target=\"_blank\" rel=\"noopener\" href=\"" + proofUrl + "\">Open File</a>";
+            content.innerHTML = "<div class=\"file-open-fallback\"><p>This payment proof file cannot be previewed here.</p><a class=\"btn btn-outline\" target=\"_blank\" rel=\"noopener\" href=\"" + proofUrl + "\">Open File</a></div>";
         }
         openModal("modal-payment-proof");
     }
     function openPaymentProofModal(button) {
-        openPaymentProof(button.dataset.proofUrl || "", button.dataset.proofExt || "");
+        openPaymentProof(button.dataset.proofUrl || "", button.dataset.proofExt || "", button.dataset.proofTitle || "");
+    }
+    function showAppointmentNotification(message, type = "success", reload = false) {
+        const table = document.getElementById("appointmentsTableBody");
+        const container = table?.closest(".card")?.parentNode || document.querySelector(".page-content") || document.body;
+        document.querySelectorAll(".appointment-flash-message").forEach(messageBox => messageBox.remove());
+
+        const notice = document.createElement("div");
+        notice.className = "toast flash-message show " + type + " appointment-flash-message";
+        notice.textContent = message;
+        container.prepend(notice);
+        notice.scrollIntoView({ block: "nearest", behavior: "smooth" });
+
+        if (reload) {
+            setTimeout(function () {
+                window.location.reload();
+            }, 5000);
+            return;
+        }
+
+        setTimeout(function () {
+            notice.classList.add("hiding");
+            setTimeout(function () {
+                notice.remove();
+            }, 350);
+        }, 5000);
     }
     async function printAppointmentReceipt(paymentId) {
         if (!paymentId) {
@@ -1259,12 +1543,16 @@ function render_appointments($role) {
             alert("Payment record not found.");
             return;
         }
-        const reason = prompt("Please enter a reason for your refund request:");
-        if (reason === null) {
-            return;
-        }
+        document.getElementById("refundPaymentId").value = paymentId;
+        document.getElementById("refundAppointmentReason").value = "";
+        openModal("modal-request-refund");
+    }
+    async function submitAppointmentRefund(event) {
+        event.preventDefault();
+        const paymentId = document.getElementById("refundPaymentId").value;
+        const reason = document.getElementById("refundAppointmentReason").value;
         if (!reason.trim()) {
-            alert("Please provide a reason for refund request.");
+            showAppointmentNotification("Please provide a reason for refund request.", "error");
             return;
         }
         const response = await fetch("' . e(app_url('action.php')) . '", {
@@ -1274,10 +1562,10 @@ function render_appointments($role) {
         });
         const data = await response.json();
         if (data.success) {
-            alert("Refund request submitted. Please wait for admin approval.");
-            window.location.reload();
+            closeModal("modal-request-refund");
+            showAppointmentNotification("Refund request submitted. Waiting for admin approval.", "success", true);
         } else {
-            alert("Error: " + data.message);
+            showAppointmentNotification("Error: " + data.message, "error");
         }
     }
     function closeAppointmentMenus() {
@@ -1306,12 +1594,13 @@ function render_appointments($role) {
         const rows = document.querySelectorAll("#appointmentsTableBody tr");
         rows.forEach(row => {
             const text = row.innerText.toLowerCase();
-            const dateCell = row.cells[4]?.dataset.date || "";
-            const statusCell = ((row.cells[6]?.innerText || "") + " " + (row.cells[7]?.innerText || "")).toLowerCase();
+            const dateCell = row.querySelector("td[data-date]")?.dataset.date || "";
+            const appointmentStatus = row.dataset.appointmentStatus || "";
+            const paymentStatus = row.dataset.paymentStatus || "";
             let show = true;
             if (searchValue && !text.includes(searchValue)) show = false;
             if (filterDate && dateCell !== filterDate) show = false;
-            if (filterStatus && !statusCell.includes(filterStatus)) show = false;
+            if (filterStatus && appointmentStatus !== filterStatus && paymentStatus !== filterStatus) show = false;
             row.style.display = show ? "" : "none";
         });
     }
@@ -1328,7 +1617,7 @@ function render_book_legacy() {
     echo '<form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="book_appointment"><div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Choose Service</span></div><div class="card-body"><div class="services-grid">';
     foreach ($services as $s) echo '<label class="service-card"><input type="checkbox" name="service" value="' . e($s['service_name']) . '" required> <span class="service-icon">' . e($s['service_icon']) . '</span><div class="service-name">' . e($s['service_name']) . '</div><div class="service-price">RM ' . e(number_format((float) $s['service_price'], 2)) . '</div><div class="service-desc">' . e($s['service_description']) . '</div></label>';
     echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Choose Doctor</span></div><div class="card-body"><div class="doctor-grid">';
-    foreach ($doctors as $d) echo '<label class="doctor-card"><input type="radio" name="doctor" value="' . e($d['doctor_name']) . '" required><div class="doctor-avatar">' . e($d['doctor_icon']) . '</div><div class="doctor-name">' . e($d['doctor_name']) . '</div><div class="doctor-spec">' . e($d['doctor_specialist']) . '</div><div class="doctor-avail">Available ' . e($d['available_days'] ?: 'Not scheduled') . '</div></label>';
+    foreach ($doctors as $d) echo '<label class="doctor-card"><input type="radio" name="doctor" value="' . e($d['doctor_name']) . '" required>' . doctor_avatar_html($d) . '<div class="doctor-name">' . e($d['doctor_name']) . '</div><div class="doctor-spec">' . e($d['doctor_specialist']) . '</div><div class="doctor-avail">Available ' . e($d['available_days'] ?: 'Not scheduled') . '</div></label>';
     echo '</div></div></div></div><div class="card mt-20"><div class="card-header"><span class="card-title">Date, Time & Notes</span></div><div class="card-body"><div class="grid-2"><div class="form-group"><label>Date</label><input class="form-control" type="date" name="date" required></div><div class="form-group"><label>Time</label><select class="form-control" name="time" required><option>09:00</option><option>09:30</option><option>10:00</option><option>10:30</option><option>11:00</option><option>14:00</option></select></div></div><div class="form-group"><label>Symptoms / Notes</label><textarea class="form-control" rows="5" name="notes" placeholder="e.g. Fever for 3 days, headache…"></textarea></div><button class="btn btn-primary" style="width:auto">Confirm Appointment</button></div></div></form>';
 }
 
@@ -1438,7 +1727,7 @@ function render_book() {
     foreach ($doctors as $d) {
         $availableDays = $d['available_days'] ?: 'Not scheduled';
         echo '<button type="button" class="book-doctor-card js-select-doctor" data-doctor-name="' . e($d['doctor_name']) . '" data-doctor-specialist="' . e($d['doctor_specialist']) . '">';
-        echo '<div class="doctor-avatar">' . e($d['doctor_icon']) . '</div>';
+        echo doctor_avatar_html($d);
         echo '<div class="doctor-name">' . e($d['doctor_name']) . '</div>';
         echo '<div class="doctor-spec">' . e($d['doctor_specialist']) . '</div>';
         echo '<div class="doctor-avail">&#9989; ' . e($availableDays) . '</div>';
@@ -1517,7 +1806,7 @@ function render_book() {
             }
             bookingNoticeTimer = setTimeout(function () {
                 bookingNotice.classList.remove("show");
-            }, 4200);
+            }, 5000);
         }
 
         function formatDate(value) {
@@ -1742,6 +2031,8 @@ function render_payment($role) {
 
 function render_reports() {
     global $conn;
+    $currentMonth = (int)date('n');
+    $currentYear = (int)date('Y');
     $yearRows = fetch_all_assoc(
         $conn,
         "SELECT DISTINCT YEAR(report_date) AS report_year
@@ -1760,9 +2051,10 @@ function render_reports() {
             COUNT(*) AS total,
             SUM(appointment_status = 'completed') AS completed,
             SUM(appointment_status IN ('confirmed', 'confirm')) AS confirmed,
-            SUM(appointment_status = 'cancelled') AS cancelled
+            SUM(appointment_status = 'cancelled') AS cancelled,
+            COALESCE(SUM(amount), 0) AS appointment_value
          FROM appointments"
-    )[0] ?? ['total' => 0, 'completed' => 0, 'confirmed' => 0, 'cancelled' => 0];
+    )[0] ?? ['total' => 0, 'completed' => 0, 'confirmed' => 0, 'cancelled' => 0, 'appointment_value' => 0];
 
     $monthlyRows = fetch_all_assoc(
         $conn,
@@ -1775,14 +2067,24 @@ function render_reports() {
          ORDER BY YEAR(appointment_date) DESC, MONTH(appointment_date) DESC"
     );
 
+    $appointmentRows = fetch_all_assoc(
+        $conn,
+        "SELECT appointment_code, name, doctor_name, service_name, appointment_date, appointment_time,
+                appointment_status, payment_status, amount
+         FROM appointments
+         ORDER BY appointment_date DESC, appointment_time DESC, appointment_id DESC"
+    );
+
     $paymentSummary = fetch_all_assoc(
         $conn,
         "SELECT
             COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
             SUM(payment_status IN ('paid', 'approved')) AS paid_count,
-            COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'verifying') THEN amount ELSE 0 END), 0) AS pending_amount
+            COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'verifying') THEN amount ELSE 0 END), 0) AS pending_amount,
+            COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN amount ELSE 0 END), 0) AS refunded_amount,
+            SUM(payment_status = 'refunded') AS refunded_count
          FROM payments"
-    )[0] ?? ['revenue' => 0, 'paid_count' => 0, 'pending_amount' => 0];
+    )[0] ?? ['revenue' => 0, 'paid_count' => 0, 'pending_amount' => 0, 'refunded_amount' => 0, 'refunded_count' => 0];
 
     $paymentMonthlyRows = fetch_all_assoc(
         $conn,
@@ -1794,27 +2096,51 @@ function render_reports() {
          GROUP BY YEAR(payment_date), MONTH(payment_date)
          ORDER BY YEAR(payment_date) DESC, MONTH(payment_date) DESC"
     );
+    $paymentRows = get_all_payments();
+    $completionRate = (int)($summary['total'] ?? 0) > 0 ? round(((int)($summary['completed'] ?? 0) / (int)$summary['total']) * 100) : 0;
 
-    echo '<div class="toolbar"><div class="filter-group"><select class="filter-select" id="reportMonth">';
+    echo '<style>
+    .report-page { display: flex; flex-direction: column; gap: 18px; }
+    .report-tabs { display: inline-flex; gap: 6px; padding: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; }
+    .report-tab { border: 0; background: transparent; color: var(--text-muted); padding: 10px 16px; border-radius: 6px; font-weight: 700; cursor: pointer; }
+    .report-tab.active { background: var(--primary); color: #fff; }
+    .report-panel { display: none; }
+    .report-panel.active { display: block; }
+    .report-hero { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .report-metric { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 18px; box-shadow: var(--shadow); }
+    .report-metric .metric-label { color: var(--text-muted); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    .report-metric .metric-value { color: var(--primary); font-size: 26px; font-weight: 800; margin-top: 8px; }
+    .report-section-title { font-size: 18px; font-weight: 800; margin-bottom: 12px; }
+    .report-table-wrap { overflow-x: auto; }
+    .report-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    @media (max-width: 900px) { .report-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 640px) { .report-hero { grid-template-columns: 1fr; } .report-tabs { width: 100%; } .report-tab { flex: 1; } }
+    </style>';
+
+    echo '<div class="report-page">';
+    echo '<div class="toolbar"><div class="report-tabs" role="tablist"><button type="button" class="report-tab active" data-report-tab="appointments">Appointment Report</button><button type="button" class="report-tab" data-report-tab="payments">Payment Report</button></div><div class="report-actions"><select class="filter-select" id="reportPeriod"><option value="monthly" selected>Monthly</option><option value="yearly">Yearly</option></select><select class="filter-select" id="reportMonth">';
     for ($month = 1; $month <= 12; $month++) {
-        echo '<option value="' . e($month) . '"' . ($month === (int)date('n') ? ' selected' : '') . '>' . e(date('F', mktime(0, 0, 0, $month, 1))) . '</option>';
+        echo '<option value="' . e($month) . '"' . ($month === $currentMonth ? ' selected' : '') . '>' . e(date('F', mktime(0, 0, 0, $month, 1))) . '</option>';
     }
     echo '</select><select class="filter-select" id="reportYear">';
     if (empty($yearRows)) {
-        echo '<option value="' . e(date('Y')) . '">' . e(date('Y')) . '</option>';
+        echo '<option value="' . e($currentYear) . '">' . e($currentYear) . '</option>';
     }
     foreach ($yearRows as $row) {
-        $year = (int)($row['report_year'] ?? date('Y'));
-        echo '<option value="' . e($year) . '"' . ($year === (int)date('Y') ? ' selected' : '') . '>' . e($year) . '</option>';
+        $year = (int)($row['report_year'] ?? $currentYear);
+        echo '<option value="' . e($year) . '"' . ($year === $currentYear ? ' selected' : '') . '>' . e($year) . '</option>';
     }
     echo '</select></div></div>';
 
-    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Appointment Report</span><a class="btn btn-sm btn-outline report-export-link" href="' . e(action_url('export_report')) . '">⬇ Export</a></div><div class="card-body"><div class="report-summary">';
-    echo '<div class="report-item"><div class="val">' . e((int)($summary['total'] ?? 0)) . '</div><div class="lbl">Total</div></div>';
-    echo '<div class="report-item"><div class="val">' . e((int)($summary['completed'] ?? 0)) . '</div><div class="lbl">Completed</div></div>';
-    echo '<div class="report-item"><div class="val">' . e((int)($summary['confirmed'] ?? 0)) . '</div><div class="lbl">Pending</div></div>';
-    echo '<div class="report-item"><div class="val">' . e((int)($summary['cancelled'] ?? 0)) . '</div><div class="lbl">Cancelled</div></div></div>';
-    echo '<table><thead><tr><th>Month</th><th>Total</th><th>Completed</th><th>Rate</th></tr></thead><tbody>';
+    echo '<section class="report-panel active" id="report-panel-appointments">';
+    echo '<div class="report-hero">';
+    echo '<div class="report-metric"><div class="metric-label">Total Appointments</div><div class="metric-value">' . e((int)($summary['total'] ?? 0)) . '</div></div>';
+    echo '<div class="report-metric"><div class="metric-label">Completed</div><div class="metric-value">' . e((int)($summary['completed'] ?? 0)) . '</div></div>';
+    echo '<div class="report-metric"><div class="metric-label">Completion Rate</div><div class="metric-value">' . e($completionRate) . '%</div></div>';
+    echo '<div class="report-metric"><div class="metric-label">Service Value</div><div class="metric-value">RM ' . e(number_format((float)($summary['appointment_value'] ?? 0), 2)) . '</div></div>';
+    echo '</div>';
+    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control report-search" data-target="appointmentReportRows" type="text" placeholder="Search appointments..."></div><div class="filter-group"><select class="filter-select report-status-filter" data-target="appointmentReportRows"><option value="all">All Status</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select><a class="btn btn-sm btn-outline report-export-link" data-report-type="appointments" href="' . e(action_url('export_report', ['report_type' => 'appointments'])) . '">⬇ Export Appointment Report</a></div></div>';
+    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Monthly Appointment Performance</span></div><div class="card-body report-table-wrap"><table><thead><tr><th>Month</th><th>Total</th><th>Completed</th><th>Rate</th></tr></thead><tbody>';
     if (empty($monthlyRows)) {
         echo '<tr><td colspan="4" style="text-align:center">No appointment data found.</td></tr>';
     }
@@ -1825,36 +2151,94 @@ function render_reports() {
         $rateClass = $rate >= 80 ? 'paid' : ($rate >= 50 ? 'pending' : 'rejected');
         echo '<tr><td>' . e($row['month_label']) . '</td><td>' . e($total) . '</td><td>' . e($completed) . '</td><td><span class="badge badge-' . e($rateClass) . '">' . e($rate) . '%</span></td></tr>';
     }
-    echo '</tbody></table></div></div><div class="card"><div class="card-header"><span class="card-title">Payment Report</span><a class="btn btn-sm btn-outline report-export-link" href="' . e(action_url('export_report')) . '">⬇ Export</a></div><div class="card-body"><div class="report-summary">';
-    echo '<div class="report-item"><div class="val">RM ' . e(number_format((float)($paymentSummary['revenue'] ?? 0), 2)) . '</div><div class="lbl">Total Revenue</div></div>';
-    echo '<div class="report-item"><div class="val">' . e((int)($paymentSummary['paid_count'] ?? 0)) . '</div><div class="lbl">Paid Invoices</div></div>';
-    echo '<div class="report-item"><div class="val">RM ' . e(number_format((float)($paymentSummary['pending_amount'] ?? 0), 2)) . '</div><div class="lbl">Pending</div></div>';
-    echo '</div><table><thead><tr><th>Month</th><th>Revenue</th><th>Invoices</th></tr></thead><tbody>';
+    echo '</tbody></table></div></div>';
+    echo '<div class="card"><div class="card-header"><span class="card-title">Appointment Details</span></div><div class="card-body report-table-wrap" style="padding:0"><table><thead><tr><th>ID</th><th>Patient</th><th>Doctor</th><th>Service</th><th>Date</th><th>Status</th><th>Payment</th><th>Amount</th></tr></thead><tbody id="appointmentReportRows">';
+    if (empty($appointmentRows)) {
+        echo '<tr><td colspan="8" style="text-align:center">No appointments found.</td></tr>';
+    }
+    foreach ($appointmentRows as $row) {
+        $status = strtolower($row['appointment_status'] ?? '');
+        echo '<tr data-status="' . e($status) . '"><td>' . e($row['appointment_code'] ?? '-') . '</td><td>' . e($row['name'] ?? '-') . '</td><td>' . e($row['doctor_name'] ?? '-') . '</td><td>' . e($row['service_name'] ?? '-') . '</td><td>' . e(format_date_display($row['appointment_date'] ?? '')) . '</td><td>' . badge($status) . '</td><td>' . badge($row['payment_status'] ?? 'pending') . '</td><td>RM ' . e(number_format((float)($row['amount'] ?? 0), 2)) . '</td></tr>';
+    }
+    echo '</tbody></table></div></div></div></section>';
+
+    echo '<section class="report-panel" id="report-panel-payments">';
+    echo '<div class="report-hero">';
+    echo '<div class="report-metric"><div class="metric-label">Total Revenue</div><div class="metric-value">RM ' . e(number_format((float)($paymentSummary['revenue'] ?? 0), 2)) . '</div></div>';
+    echo '<div class="report-metric"><div class="metric-label">Paid Receipts</div><div class="metric-value">' . e((int)($paymentSummary['paid_count'] ?? 0)) . '</div></div>';
+    echo '<div class="report-metric"><div class="metric-label">Pending Amount</div><div class="metric-value">RM ' . e(number_format((float)($paymentSummary['pending_amount'] ?? 0), 2)) . '</div></div>';
+    echo '<div class="report-metric"><div class="metric-label">Refunded</div><div class="metric-value">RM ' . e(number_format((float)($paymentSummary['refunded_amount'] ?? 0), 2)) . '</div></div>';
+    echo '</div>';
+    echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control report-search" data-target="paymentReportRows" type="text" placeholder="Search payments..."></div><div class="filter-group"><select class="filter-select report-status-filter" data-target="paymentReportRows"><option value="all">All Status</option><option value="pending">Pending</option><option value="verifying">Verifying</option><option value="approved">Paid</option><option value="rejected">Rejected</option><option value="refund_requested">Refund Requested</option><option value="refunded">Refunded</option><option value="refund_rejected">Refund Rejected</option></select><a class="btn btn-sm btn-outline report-export-link" data-report-type="payments" href="' . e(action_url('export_report', ['report_type' => 'payments'])) . '">⬇ Export Payment Report</a></div></div>';
+    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Monthly Revenue Performance</span></div><div class="card-body report-table-wrap"><table><thead><tr><th>Month</th><th>Revenue</th><th>Paid Receipts</th></tr></thead><tbody>';
     if (empty($paymentMonthlyRows)) {
         echo '<tr><td colspan="3" style="text-align:center">No payment data found.</td></tr>';
     }
     foreach ($paymentMonthlyRows as $row) {
         echo '<tr><td>' . e($row['month_label']) . '</td><td>RM ' . e(number_format((float)($row['revenue'] ?? 0), 2)) . '</td><td>' . e((int)($row['invoices'] ?? 0)) . '</td></tr>';
     }
-    echo '</tbody></table></div></div></div>';
+    echo '</tbody></table></div></div>';
+    echo '<div class="card"><div class="card-header"><span class="card-title">Payment Details</span></div><div class="card-body report-table-wrap" style="padding:0"><table><thead><tr><th>Date</th><th>Receipt #</th><th>Patient</th><th>Appointment</th><th>Amount</th><th>Transaction ID</th><th>Status</th></tr></thead><tbody id="paymentReportRows">';
+    if (empty($paymentRows)) {
+        echo '<tr><td colspan="7" style="text-align:center">No payments found.</td></tr>';
+    }
+    foreach ($paymentRows as $row) {
+        $status = strtolower($row['payment_status'] ?? 'pending');
+        echo '<tr data-status="' . e($status) . '"><td>' . e(format_date_display($row['payment_date'] ?? '')) . '</td><td>' . e($row['receipt_number'] ?? '-') . '</td><td>' . e($row['patient_name'] ?? '-') . '</td><td>' . e($row['appointment_code'] ?? '-') . '</td><td>RM ' . e(number_format((float)($row['amount'] ?? 0), 2)) . '</td><td>' . e($row['transaction_id'] ?? '-') . '</td><td>' . badge($status) . '</td></tr>';
+    }
+    echo '</tbody></table></div></div></div></section></div>';
     echo '<script>
     (function () {
         const monthSelect = document.getElementById("reportMonth");
         const yearSelect = document.getElementById("reportYear");
+        const periodSelect = document.getElementById("reportPeriod");
         const exportLinks = document.querySelectorAll(".report-export-link");
+        const tabs = document.querySelectorAll(".report-tab");
+        const panels = document.querySelectorAll(".report-panel");
         const baseUrl = ' . json_encode(action_url('export_report')) . ';
         function updateReportExportLinks() {
-            const params = new URLSearchParams();
-            params.set("action", "export_report");
-            params.set("month", monthSelect?.value || "");
-            params.set("year", yearSelect?.value || "");
             exportLinks.forEach(link => {
+                const params = new URLSearchParams();
+                params.set("action", "export_report");
+                params.set("report_type", link.dataset.reportType || "appointments");
+                params.set("period", periodSelect?.value || "monthly");
+                if ((periodSelect?.value || "monthly") === "monthly") {
+                    params.set("month", monthSelect?.value || "");
+                }
+                params.set("year", yearSelect?.value || "");
                 link.href = baseUrl.split("?")[0] + "?" + params.toString();
             });
         }
+        function updatePeriodControls() {
+            if (monthSelect) {
+                monthSelect.style.display = (periodSelect?.value || "monthly") === "yearly" ? "none" : "";
+            }
+            updateReportExportLinks();
+        }
+        function filterReportRows(targetId) {
+            const search = document.querySelector(`.report-search[data-target="${targetId}"]`)?.value.toLowerCase() || "";
+            const status = document.querySelector(`.report-status-filter[data-target="${targetId}"]`)?.value || "all";
+            document.querySelectorAll(`#${targetId} tr`).forEach(row => {
+                const matchesSearch = !search || row.innerText.toLowerCase().includes(search);
+                const matchesStatus = status === "all" || row.dataset.status === status || (status === "confirmed" && row.dataset.status === "confirm");
+                row.style.display = matchesSearch && matchesStatus ? "" : "none";
+            });
+        }
+        tabs.forEach(tab => {
+            tab.addEventListener("click", function () {
+                const target = this.dataset.reportTab || "appointments";
+                tabs.forEach(item => item.classList.toggle("active", item === this));
+                panels.forEach(panel => panel.classList.toggle("active", panel.id === `report-panel-${target}`));
+            });
+        });
+        document.querySelectorAll(".report-search, .report-status-filter").forEach(control => {
+            control.addEventListener("input", () => filterReportRows(control.dataset.target));
+            control.addEventListener("change", () => filterReportRows(control.dataset.target));
+        });
         monthSelect?.addEventListener("change", updateReportExportLinks);
         yearSelect?.addEventListener("change", updateReportExportLinks);
-        updateReportExportLinks();
+        periodSelect?.addEventListener("change", updatePeriodControls);
+        updatePeriodControls();
     })();
     </script>';
 }
@@ -1904,6 +2288,10 @@ function render_staff() {
 function render_schedule() {
     global $conn;
     $today = date('Y-m-d');
+    $selectedDate = $_GET['date'] ?? $today;
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate)) {
+        $selectedDate = $today;
+    }
     $doctors = get_doctors($conn);
     $appointments = fetch_all_assoc(
         $conn,
@@ -1912,10 +2300,10 @@ function render_schedule() {
          WHERE appointment_date = ? AND appointment_status <> 'cancelled'
          ORDER BY appointment_time ASC",
         's',
-        [$today]
+        [$selectedDate]
     );
 
-    echo '<div class="toolbar"><input class="form-control" type="date" id="scheduleDate" style="width:200px" value="' . e($today) . '"><select class="filter-select" id="scheduleDoctor"><option value="">All Doctors</option>';
+    echo '<div class="toolbar"><input class="form-control" type="date" id="scheduleDate" style="width:200px" value="' . e($selectedDate) . '" required><select class="filter-select" id="scheduleDoctor"><option value="">All Doctors</option>';
     foreach ($doctors as $doctor) {
         echo '<option>' . e($doctor['doctor_name']) . '</option>';
     }
@@ -1924,8 +2312,8 @@ function render_schedule() {
         echo '<tr><td colspan="6" style="text-align:center">No appointments found.</td></tr>';
     }
     foreach ($appointments as $row) {
-        $canComplete = appointment_time_has_passed($row['appointment_date'] ?? '', $row['appointment_time'] ?? '');
-        $action = in_array($row['appointment_status'], ['completed', 'cancelled', 'rejected'], true) || !$canComplete
+        $canComplete = in_array($row['appointment_status'] ?? '', ['confirm', 'confirmed'], true);
+        $action = !$canComplete
             ? '<span class="text-muted">-</span>'
             : '<a class="btn btn-sm btn-teal" href="' . e(action_url('update_status', ['id' => $row['appointment_code']])) . '">Complete</a>';
         echo '<tr><td>' . e(format_time_display($row['appointment_time'])) . '</td><td>' . e($row['name']) . '</td><td>' . e($row['doctor_name']) . '</td><td>' . e($row['service_name']) . '</td><td>' . appointment_badge($row['appointment_status'], 'staff') . '</td><td>' . $action . '</td></tr>';
@@ -1940,6 +2328,11 @@ function render_schedule() {
             row.style.display = doctor && !doctorCell.includes(doctor) ? "none" : "";
         });
     }
+    document.getElementById("scheduleDate")?.addEventListener("change", function () {
+        const url = new URL(window.location.href);
+        url.searchParams.set("date", this.value);
+        window.location.href = url.toString();
+    });
     document.getElementById("scheduleDoctor")?.addEventListener("change", filterSchedule);
     </script>';
 }
@@ -1980,39 +2373,35 @@ function render_users() {
     
     echo '<div class="card">
             <div class="card-body" style="padding:0; overflow-x: auto;">
-                <table class="data-table" style="width:100%; border-collapse: collapse; min-width: 700px;">
+                <table class="data-table" style="width:100%; border-collapse: collapse; min-width: 640px;">
                     <thead>
                         <tr style="background: var(--surface2); border-bottom: 2px solid var(--border);">
                             <th style="padding: 12px 8px; text-align: left;">User ID</th>
                             <th style="padding: 12px 8px; text-align: left;">Name</th>
                             <th style="padding: 12px 8px; text-align: left;">Email</th>
-                            <th style="padding: 12px 8px; text-align: left;">Phone</th>
-                            <th style="padding: 12px 8px; text-align: left;">Gender</th>
-                            <th style="padding: 12px 8px; text-align: left;">Date of Birth</th>
-                            <th style="padding: 12px 8px; text-align: left;">Blood Type</th>
-                            <th style="padding: 12px 8px; text-align: left;">Last Visit</th>
                             <th style="padding: 12px 8px; text-align: left;">Status</th>
+                            <th style="padding: 12px 8px; text-align: center;">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="usersTableBody">';
     
     if (empty($users)) {
-        echo '<tr><td colspan="9" style="text-align:center;padding:16px">No users found.</td></tr>';
+        echo '<tr><td colspan="5" style="text-align:center;padding:16px">No users found.</td></tr>';
     }
 
     foreach ($users as $u) {
         $status = strtolower($u['user_status'] ?? 'inactive');
         $lastVisit = !empty($u['last_visit']) ? date('d M Y, H:i', strtotime($u['last_visit'])) : '-';
-        echo '<tr data-status="' . e($status) . '" style="border-bottom: 1px solid var(--border);">
+        $phone = format_phone_number($u['phone_number'] ?? '');
+        $dateOfBirth = !empty($u['date_of_birth']) ? format_date_display($u['date_of_birth']) : '-';
+        $detailsAttrs = ' data-id="' . e($u['user_code']) . '" data-name="' . e($u['name']) . '" data-email="' . e($u['email']) . '" data-phone="' . e($phone !== '' ? $phone : '-') . '" data-gender="' . e($u['gender'] ?: '-') . '" data-dob="' . e($dateOfBirth) . '" data-blood="' . e($u['blood_type'] ?: '-') . '" data-last-visit="' . e($lastVisit) . '" data-status="' . e($status) . '"';
+        $searchText = implode(' ', [$u['user_code'], $u['name'], $u['email'], $phone, $u['gender'], $dateOfBirth, $u['blood_type'], $lastVisit, $status]);
+        echo '<tr data-status="' . e($status) . '" data-search="' . e($searchText) . '" style="border-bottom: 1px solid var(--border);">
                 <td style="padding: 12px 8px;">' . e($u['user_code']) . '</td>
                 <td style="padding: 12px 8px;">' . e($u['name']) . '</td>
                 <td style="padding: 12px 8px;">' . e($u['email']) . '</td>
-                <td style="padding: 12px 8px;">' . e(format_phone_number($u['phone_number'] ?? '')) . '</td>
-                <td style="padding: 12px 8px;">' . e($u['gender'] ?: '-') . '</td>
-                <td style="padding: 12px 8px;">' . e(!empty($u['date_of_birth']) ? format_date_display($u['date_of_birth']) : '-') . '</td>
-                <td style="padding: 12px 8px;">' . e($u['blood_type'] ?: '-') . '</td>
-                <td style="padding: 12px 8px;">' . e($lastVisit) . '</td>
                 <td style="padding: 12px 8px;">' . badge($status) . '</td>
+                <td class="appt-actions-cell" style="padding: 12px 8px;"><div class="appt-action-menu"><button type="button" class="appt-menu-trigger" onclick="toggleUserMenu(event, this)" aria-label="User actions">...</button><div class="appt-menu-list"><button type="button" class="appt-menu-item" onclick="showUserDetails(this)"' . $detailsAttrs . '>View Details</button></div></div></td>
                </tr>';
     }
     
@@ -2020,6 +2409,7 @@ function render_users() {
                 </table>
             </div>
           </div>';
+    echo '<div class="modal-overlay" id="modal-user-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">User Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-user-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>User ID</span><strong id="userDetailId"></strong></div><div class="appointment-detail-list"><div><span>Name</span><strong id="userDetailName"></strong></div><div><span>Email</span><strong id="userDetailEmail"></strong></div><div><span>Phone</span><strong id="userDetailPhone"></strong></div><div><span>Gender</span><strong id="userDetailGender"></strong></div><div><span>Date of Birth</span><strong id="userDetailDob"></strong></div><div><span>Blood Type</span><strong id="userDetailBlood"></strong></div><div><span>Last Visit</span><strong id="userDetailLastVisit"></strong></div><div><span>Status</span><strong id="userDetailStatus"></strong></div></div></div></div></div>';
     
     // Add search filter script
     echo '
@@ -2030,7 +2420,7 @@ function render_users() {
         const rows = document.querySelectorAll("#usersTableBody tr");
         
         rows.forEach(row => {
-            const text = row.innerText.toLowerCase();
+            const text = (row.dataset.search || row.innerText).toLowerCase();
             const statusValue = row.dataset.status || "";
             let show = true;
             
@@ -2046,6 +2436,41 @@ function render_users() {
     
     if (searchInput) searchInput.addEventListener("keyup", filterUsers);
     if (statusFilter) statusFilter.addEventListener("change", filterUsers);
+    function formatUserStatusLabel(status) {
+        return status ? status.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase()) : "-";
+    }
+    function showUserDetails(button) {
+        document.getElementById("userDetailId").textContent = button.dataset.id || "-";
+        document.getElementById("userDetailName").textContent = button.dataset.name || "-";
+        document.getElementById("userDetailEmail").textContent = button.dataset.email || "-";
+        document.getElementById("userDetailPhone").textContent = button.dataset.phone || "-";
+        document.getElementById("userDetailGender").textContent = button.dataset.gender || "-";
+        document.getElementById("userDetailDob").textContent = button.dataset.dob || "-";
+        document.getElementById("userDetailBlood").textContent = button.dataset.blood || "-";
+        document.getElementById("userDetailLastVisit").textContent = button.dataset.lastVisit || "-";
+        const status = button.dataset.status || "";
+        document.getElementById("userDetailStatus").innerHTML = "<span class=\"badge badge-" + status.replace(/_/g, "-") + "\">" + formatUserStatusLabel(status) + "</span>";
+        openModal("modal-user-details");
+    }
+    function closeUserMenus() {
+        document.querySelectorAll(".appt-action-menu.open").forEach(menu => menu.classList.remove("open"));
+    }
+    function toggleUserMenu(event, button) {
+        event.stopPropagation();
+        const menu = button.closest(".appt-action-menu");
+        const menuList = menu.querySelector(".appt-menu-list");
+        const wasOpen = menu.classList.contains("open");
+        closeUserMenus();
+        menu.classList.toggle("open", !wasOpen);
+        if (!wasOpen && menuList) {
+            const rect = button.getBoundingClientRect();
+            const menuWidth = menuList.offsetWidth || 148;
+            const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth));
+            menuList.style.top = (rect.bottom + 6) + "px";
+            menuList.style.left = left + "px";
+        }
+    }
+    document.addEventListener("click", closeUserMenus);
     </script>';
 }
 
@@ -2058,13 +2483,25 @@ function render_modals() {
     echo <<<'HTML'
 <div class="modal-overlay" id="modal-add-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Add Staff Member</span><button class="modal-close" onclick="closeModal('modal-add-staff')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_staff"><input type="hidden" name="role" value="staff"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" placeholder="e.g. Nurul Ain binti Razak" required></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" placeholder="staff@QuickCare.my" required></div><div class="form-group"><label>Password</label><input class="form-control" type="password" name="password" required></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone_number" data-phone-format placeholder="+60 12-345 6789"></div><div class="form-group"><label>Role</label><input class="form-control" value="Staff" readonly></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 <div class="modal-overlay" id="modal-edit-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Staff Member</span><button class="modal-close" onclick="closeModal('modal-edit-staff')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="update_staff"><input type="hidden" name="id" id="editStaffId"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" id="editStaffName" required></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" id="editStaffEmail" required></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone_number" id="editStaffPhone" data-phone-format placeholder="+60 12-345 6789"></div><div class="form-group"><label>Role</label><input class="form-control" value="Staff" readonly></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-edit-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save Changes</button></div></form></div></div>
-<div class="modal-overlay" id="modal-add-doctor"><div class="modal"><div class="modal-header"><span class="modal-title" id="doctorModalTitle">Add Doctor</span><button class="modal-close" onclick="closeModal('modal-add-doctor')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_doctor"><input type="hidden" name="id" id="editDoctorId" value=""><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" id="editDoctorName" placeholder="e.g. Dr. Ahmad Fauzi" required></div><div class="form-group"><label>Specialization</label><input class="form-control" name="specialization" id="editDoctorSpec" required></div><div class="form-group"><label>Available Days</label><div id="doctorDaysContainer" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;"><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Mon"> Mon</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Tue"> Tue</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Wed"> Wed</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Thu"> Thu</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Fri"> Fri</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sat"> Sat</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sun"> Sun</label></div></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-doctor')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
+<div class="modal-overlay" id="modal-add-doctor"><div class="modal"><div class="modal-header"><span class="modal-title" id="doctorModalTitle">Add Doctor</span><button class="modal-close" onclick="closeModal('modal-add-doctor')">✕</button></div><form method="post" action="action.php" enctype="multipart/form-data"><input type="hidden" name="action" value="save_doctor"><input type="hidden" name="id" id="editDoctorId" value=""><div class="modal-body"><div class="form-group"><label>Doctor Photo</label><input class="form-control" type="file" name="doctor_image" id="editDoctorImage" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted" style="margin-top:6px">JPG, PNG, or WEBP. Max 2MB. Leave blank to keep the current photo.</p></div><div class="form-group"><label>Full Name</label><input class="form-control" name="name" id="editDoctorName" placeholder="e.g. Dr. Ahmad Fauzi" required></div><div class="form-group"><label>Specialization</label><input class="form-control" name="specialization" id="editDoctorSpec" required></div><div class="form-group"><label>Available Days</label><div id="doctorDaysContainer" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;"><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Mon"> Mon</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Tue"> Tue</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Wed"> Wed</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Thu"> Thu</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Fri"> Fri</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sat"> Sat</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sun"> Sun</label></div></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-doctor')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 <script>
+function openAddDoctorModal() {
+    document.getElementById('doctorModalTitle').textContent = 'Add Doctor';
+    document.getElementById('editDoctorId').value = '';
+    document.getElementById('editDoctorName').value = '';
+    document.getElementById('editDoctorSpec').value = '';
+    document.getElementById('editDoctorImage').value = '';
+    document.querySelectorAll('#doctorDaysContainer input[type="checkbox"]').forEach(cb => {
+        cb.checked = false;
+    });
+    openModal('modal-add-doctor');
+}
 function openEditDoctorModal(btn) {
     document.getElementById('doctorModalTitle').textContent = 'Edit Doctor';
     document.getElementById('editDoctorId').value = btn.dataset.id;
     document.getElementById('editDoctorName').value = btn.dataset.name;
     document.getElementById('editDoctorSpec').value = btn.dataset.spec;
+    document.getElementById('editDoctorImage').value = '';
     const days = btn.dataset.days.split(', ');
     document.querySelectorAll('#doctorDaysContainer input[type="checkbox"]').forEach(cb => {
         cb.checked = days.includes(cb.value);
@@ -2074,7 +2511,12 @@ function openEditDoctorModal(btn) {
 </script>
 <div class="modal-overlay" id="modal-add-service"><div class="modal"><div class="modal-header"><span class="modal-title">Add Service</span><button class="modal-close" onclick="closeModal('modal-add-service')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_service"><div class="modal-body"><div class="form-group"><label>Service Icon</label><div class="emoji-picker" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;"><input type="hidden" name="icon" id="serviceIconInput" value="🏥"><button type="button" class="btn btn-primary btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🏥')">🏥</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🦷')">🦷</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '👁️')">👁️</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '💉')">💉</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🩸')">🩸</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🫀')">🫀</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🩺')">🩺</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '💊')">💊</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🚑')">🚑</button><button type="button" class="btn btn-outline btn-sm emoji-btn" style="width: 42px; height: 42px; padding: 0; font-size: 1.25rem;" onclick="selectServiceEmoji(this, '🧪')">🧪</button></div></div><div class="form-group"><label>Service Name</label><input class="form-control" name="name" required></div><div class="form-group"><label>Fee (RM)</label><input class="form-control" type="number" step="0.01" name="fee" required></div><div class="form-group"><label>Description</label><textarea class="form-control" name="description" rows="3" required></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-service')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 HTML;
-    echo '<div class="modal-overlay" id="modal-edit-profile" data-static-modal="true"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Profile</span><button class="modal-close" onclick="closeModal(\'modal-edit-profile\')">✕</button></div><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="save_profile"><div class="modal-body">';
+    echo '<div class="modal-overlay" id="modal-edit-profile" data-static-modal="true"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Profile</span><button class="modal-close" onclick="closeModal(\'modal-edit-profile\')">✕</button></div><form method="post" action="' . e(app_url('action.php')) . '" enctype="multipart/form-data"><input type="hidden" name="action" value="save_profile"><div class="modal-body">';
+    echo '<div class="profile-upload-area"><label class="profile-upload-avatar" for="profileImage">' . user_avatar_html($user, 'profile-avatar-lg') . '<span>Change</span></label><input class="profile-file-input" id="profileImage" type="file" name="profile_image" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted profile-upload-note">Upload a square JPG, PNG, or WEBP image. Maximum file size is 2MB.</p>';
+    if (!empty($user['profile_image'])) {
+        echo '<label class="profile-delete-photo"><input type="checkbox" name="delete_profile_image" value="1"> Delete current photo</label>';
+    }
+    echo '</div>';
     echo '<div class="form-group"><label>Full Name</label><input class="form-control" name="name" value="' . e($user['name'] ?? '') . '" required></div>';
     echo '<div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" value="' . e($user['email'] ?? '') . '" required></div>';
     echo '<div class="form-group"><label>Phone</label><input class="form-control" type="tel" name="phone_number" data-phone-format pattern="^\+60\s[0-9]{2}-[0-9]{3}\s[0-9]{4,5}$" placeholder="+60 12-345 6789" value="' . e(format_phone_number($user['phone_number'] ?? '')) . '"></div>';
@@ -2093,6 +2535,20 @@ HTML;
         btn.classList.add("btn-primary");
         document.getElementById("serviceIconInput").value = emoji;
     }
+    document.getElementById("profileImage")?.addEventListener("change", function () {
+        const file = this.files && this.files[0];
+        if (!file) return;
+        const preview = document.querySelector(".profile-upload-avatar .profile-avatar-lg");
+        if (!preview) return;
+        const reader = new FileReader();
+        reader.onload = function (event) {
+            preview.classList.add("profile-avatar-image");
+            preview.innerHTML = "<img src=\"" + event.target.result + "\" alt=\"Profile avatar preview\">";
+        };
+        reader.readAsDataURL(file);
+        const deletePhoto = document.querySelector("input[name=\"delete_profile_image\"]");
+        if (deletePhoto) deletePhoto.checked = false;
+    });
     </script>';
 }
 
@@ -2199,6 +2655,41 @@ function get_all_payments() {
     while ($row = $result->fetch_assoc()) {
         $payments[] = $row;
     }
+
+    $pendingRows = fetch_all_assoc(
+        $conn,
+        "SELECT
+             0 AS payment_id,
+             '' AS payment_code,
+             a.user_id,
+             a.appointment_code,
+             '-' AS receipt_number,
+             a.amount,
+             'pending' AS payment_status,
+             '-' AS transaction_id,
+             '' AS receipt_image,
+             '' AS remarks,
+             a.created_at AS payment_date,
+             NULL AS approved_by,
+             NULL AS approved_date,
+             COALESCE(u.name, a.name) AS patient_name,
+             a.appointment_date,
+             a.doctor_name,
+             a.service_name
+         FROM appointments a
+         LEFT JOIN users u ON a.user_id = u.user_id
+         WHERE a.payment_status = 'pending'
+           AND NOT EXISTS (
+               SELECT 1
+               FROM payments p
+               WHERE p.appointment_code = a.appointment_code
+           )"
+    );
+
+    $payments = array_merge($payments, $pendingRows);
+    usort($payments, function($a, $b) {
+        return strtotime($b['payment_date'] ?? '') <=> strtotime($a['payment_date'] ?? '');
+    });
     
     return $payments;
 }
@@ -2516,8 +3007,8 @@ function request_refund($user_id, $payment_id, $reason) {
             throw new Exception('Payment not found');
         }
 
-        if (($payment['appointment_status'] ?? '') !== 'cancelled') {
-            throw new Exception('Appointment must be cancelled before requesting a refund');
+        if (!in_array($payment['appointment_status'] ?? '', ['cancelled', 'confirm', 'confirmed'], true)) {
+            throw new Exception('Only cancelled or confirmed appointments can request a refund');
         }
 
         if (!in_array($payment['payment_status'], ['paid', 'approved'], true)) {
@@ -2581,6 +3072,41 @@ function send_payment_approved_email($user_id, $payment) {
     send_email($user['email'], $subject, $body);
 }
 
+function send_appointment_cancelled_email($appointment, $reason, $cancelledBy = 'QuickCare team') {
+    $to = trim((string)($appointment['email'] ?? ''));
+    if ($to === '') {
+        return false;
+    }
+
+    $patientName = htmlspecialchars($appointment['name'] ?? 'Patient');
+    $appointmentCode = htmlspecialchars($appointment['appointment_code'] ?? '');
+    $doctorName = htmlspecialchars($appointment['doctor_name'] ?? '');
+    $serviceName = htmlspecialchars($appointment['service_name'] ?? '');
+    $appointmentDate = htmlspecialchars(format_date_display($appointment['appointment_date'] ?? ''));
+    $appointmentTime = htmlspecialchars(format_time_display($appointment['appointment_time'] ?? ''));
+    $cancelReason = nl2br(htmlspecialchars(trim((string)$reason)));
+    $cancelledBy = htmlspecialchars($cancelledBy);
+
+    $subject = "Appointment Cancelled - QuickCare";
+    $body = "
+        <h2>Appointment Cancelled ❌</h2>
+        <p>Dear {$patientName},</p>
+        <p>Your appointment has been cancelled by {$cancelledBy}.</p>
+        <h3>Appointment Details:</h3>
+        <ul>
+            <li><strong>Appointment ID:</strong> {$appointmentCode}</li>
+            <li><strong>Doctor:</strong> {$doctorName}</li>
+            <li><strong>Service:</strong> {$serviceName}</li>
+            <li><strong>Date:</strong> {$appointmentDate}</li>
+            <li><strong>Time:</strong> {$appointmentTime}</li>
+        </ul>
+        <p><strong>Cancel Reason:</strong><br>{$cancelReason}</p>
+        <p>Please contact QuickCare if you have any questions.</p>
+    ";
+
+    return send_email($to, $subject, $body);
+}
+
 // Send email for rejected payment
 function send_payment_rejected_email($user_id, $payment, $reason) {
     global $conn;
@@ -2626,7 +3152,7 @@ function send_payment_refunded_email($user_id, $payment, $reason) {
 
     $subject = "Payment Refunded - QuickCare";
     $body = "
-        <h2>Payment Refunded</h2>
+        <h2>Payment Refunded ✅</h2>
         <p>Dear {$user['name']},</p>
         <p>Your payment has been <strong>REFUNDED</strong>.</p>
         " . (trim((string)$reason) !== '' ? "<p><strong>Reason:</strong> {$reason}</p>" : "") . "
@@ -2658,7 +3184,7 @@ function send_refund_rejected_email($user_id, $payment, $reason) {
 
     $subject = "Refund Request Rejected - QuickCare";
     $body = "
-        <h2>Refund Request Rejected</h2>
+        <h2>Refund Request Rejected ❌</h2>
         <p>Dear {$user['name']},</p>
         <p>Your refund request has been <strong>REJECTED</strong>.</p>
         <p><strong>Reason:</strong> {$reason}</p>

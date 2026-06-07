@@ -23,6 +23,7 @@ $payments = get_user_payment_history($user_id);
     <?php else: ?>
         <div class="payments-list">
             <?php foreach ($payments as $payment): ?>
+            <?php $refundReceiptFile = payment_refund_receipt_file($payment['remarks'] ?? ''); ?>
             <div class="payment-card">
                 <div class="payment-header">
                     <div class="payment-info">
@@ -101,8 +102,14 @@ $payments = get_user_payment_history($user_id);
                 </div>
                 <div class="payment-footer">
                     <?php if (in_array($payment['payment_status'], ['pending', 'verifying'], true)): ?>
-                    <button class="btn-print" onclick='viewPaymentProof(<?php echo json_encode($payment['receipt_image'] ?? ''); ?>)'>
+                    <button class="btn-print" onclick='viewPaymentProof(<?php echo json_encode($payment['receipt_image'] ?? ''); ?>, "Payment Proof")'>
                         View Payment Proof
+                    </button>
+                    <?php endif; ?>
+
+                    <?php if ($payment['payment_status'] === 'refunded'): ?>
+                    <button class="btn-print" onclick='viewPaymentProof(<?php echo json_encode($refundReceiptFile); ?>, "Refund Proof")'>
+                        View Refund Proof
                     </button>
                     <?php endif; ?>
 
@@ -112,7 +119,7 @@ $payments = get_user_payment_history($user_id);
                     </button>
                     <?php endif; ?>
 
-                    <?php if (in_array($payment['payment_status'], ['approved', 'paid'], true)): ?>
+                    <?php if (in_array($payment['payment_status'], ['approved', 'paid', 'refund_requested', 'refund_rejected'], true)): ?>
                     <button class="btn-print btn-view-receipt" onclick="printReceipt(<?php echo $payment['payment_id']; ?>)">
                         View Receipt
                     </button>
@@ -158,9 +165,6 @@ $payments = get_user_payment_history($user_id);
         </div>
         <div class="modal-body">
             <div class="proof-content" id="proofContent"></div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-outline" onclick="closeProofModal()">Close</button>
         </div>
     </div>
 </div>
@@ -368,12 +372,12 @@ $payments = get_user_payment_history($user_id);
 }
 
 .proof-modal {
-    max-width: 680px;
+    max-width: 500px;
 }
 
 .proof-content {
-    min-height: 280px;
-    padding: 12px;
+    min-height: 180px;
+    padding: 16px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface2);
@@ -387,6 +391,26 @@ $payments = get_user_payment_history($user_id);
     max-height: 70vh;
     border-radius: var(--radius-sm);
     object-fit: contain;
+}
+
+.file-open-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    width: 100%;
+    min-height: 160px;
+    text-align: center;
+}
+
+.file-open-fallback p {
+    margin: 0;
+    color: var(--text-muted);
+}
+
+.file-open-fallback .btn {
+    width: auto;
 }
 
 .modal-footer {
@@ -439,13 +463,15 @@ function closeReceiptModal() {
     document.getElementById('receiptModal').style.display = 'none';
 }
 
-function viewPaymentProof(receiptImage) {
+function viewPaymentProof(receiptImage, title = 'Payment Proof') {
     const modal = document.getElementById('proofModal');
     const content = document.getElementById('proofContent');
+    const modalTitle = document.querySelector('#proofModal .modal-title');
     if (!modal || !content) return;
+    if (modalTitle) modalTitle.textContent = title;
 
     if (!receiptImage) {
-        content.innerHTML = '<p class="text-muted">No payment proof uploaded.</p>';
+        content.innerHTML = '<p class="text-muted">No proof uploaded.</p>';
         modal.style.display = 'flex';
         return;
     }
@@ -453,9 +479,9 @@ function viewPaymentProof(receiptImage) {
     const proofUrl = '../uploads/receipts/' + encodeURIComponent(receiptImage);
     const extension = receiptImage.split('.').pop().toLowerCase();
     if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) {
-        content.innerHTML = `<img src="${proofUrl}" alt="Payment proof">`;
+        content.innerHTML = `<img src="${proofUrl}" alt="${title}">`;
     } else {
-        content.innerHTML = `<a class="btn btn-outline" target="_blank" rel="noopener" href="${proofUrl}">Open Payment Proof</a>`;
+        content.innerHTML = `<div class="file-open-fallback"><p>This payment proof file cannot be previewed here.</p><a class="btn btn-outline" target="_blank" rel="noopener" href="${proofUrl}">Open File</a></div>`;
     }
     modal.style.display = 'flex';
 }

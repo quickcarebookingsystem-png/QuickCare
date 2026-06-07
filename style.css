@@ -168,6 +168,10 @@ h3 { font-size: 1.2rem; }
   box-shadow: 0 0 0 3px rgba(124,51,73,0.1);
 }
 
+textarea.form-control {
+  resize: none;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -321,6 +325,14 @@ h3 { font-size: 1.2rem; }
   font-weight: 600;
   color: var(--primary-dark);
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.profile-avatar-image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 .user-name { font-size: 0.85rem; font-weight: 500; line-height: 1.2; }
 .user-email { font-size: 0.72rem; color: rgba(255,255,255,0.45); }
@@ -625,6 +637,13 @@ tbody td { padding: 12px 16px; color: var(--text); }
   display: flex; align-items: center; justify-content: center;
   font-size: 24px;
   margin: 0 auto 10px;
+  overflow: hidden;
+}
+.doctor-avatar-image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 .doctor-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 4px; }
 .doctor-spec { font-size: 0.78rem; color: var(--text-muted); }
@@ -1023,6 +1042,59 @@ tbody td { padding: 12px 16px; color: var(--text); }
   display: flex; align-items: center; justify-content: center;
   font-size: 32px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+.profile-upload-area {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.profile-upload-avatar {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+}
+.profile-upload-avatar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.38);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.profile-upload-avatar span {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.profile-upload-avatar:hover::after,
+.profile-upload-avatar:hover span {
+  opacity: 1;
+}
+.profile-file-input {
+  display: none;
+}
+.profile-upload-note {
+  max-width: 320px;
+  text-align: center;
+}
+.profile-delete-photo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--danger);
+  font-size: 0.88rem;
+  cursor: pointer;
 }
 .profile-name { font-size: 1.3rem; font-family: 'DM Serif Display', serif; }
 .profile-meta { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
@@ -1231,7 +1303,9 @@ tbody td { padding: 12px 16px; color: var(--text); }
   text-align: center;
 }
 
-#detailNotes {
+#detailNotes,
+#detailCancelReason,
+#detailPaymentNotes {
   display: block;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -1247,8 +1321,42 @@ tbody td { padding: 12px 16px; color: var(--text); }
   font-weight: 700;
 }
 
+.appointment-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 24px;
+}
+
 .appointment-details-modal .modal-footer {
   padding: 0 30px 30px;
+}
+
+#modal-appointment-details .appointment-detail-close {
+  display: none;
+}
+
+#modal-payment-proof .modal-footer,
+#modal-dashboard-payment-proof .modal-footer {
+  display: none;
+}
+
+#modal-dashboard-receipt .modal-footer .btn-outline,
+#modal-appointment-receipt .modal-footer .btn-outline,
+#receiptModal .modal-footer .btn-outline {
+  display: none;
+}
+
+#modal-dashboard-receipt .modal-footer .btn-primary,
+#modal-appointment-receipt .modal-footer .btn-primary,
+#receiptModal .modal-footer .btn-primary {
+  width: auto;
+  min-width: 96px;
+  padding: 10px 18px;
+  font-size: 0.95rem;
+}
+
+#modal-appointment-details .modal-footer:has(#detailPaymentAction[style*="display:none"]) {
+  display: none;
 }
 
 .appointment-detail-close {
@@ -1257,15 +1365,15 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 
 .payment-proof-modal {
-  width: min(680px, 94vw);
+  width: min(500px, 94vw);
 }
 
 .payment-proof-card {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 280px;
-  padding: 12px;
+  min-height: 180px;
+  padding: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface2);
@@ -1277,6 +1385,26 @@ tbody td { padding: 12px 16px; color: var(--text); }
   max-height: 70vh;
   border-radius: var(--radius-sm);
   object-fit: contain;
+}
+
+.file-open-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 160px;
+  text-align: center;
+}
+
+.file-open-fallback p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.file-open-fallback .btn {
+  width: auto;
 }
 
 /* ====== RECEIPT ====== */
@@ -1371,6 +1499,23 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .toast.show { transform: translateY(0); opacity: 1; }
 .toast.success { background: var(--success); }
 .toast.error { background: var(--danger); }
+.toast.flash-message {
+  position: static;
+  display: block;
+  max-width: 480px;
+  margin-bottom: 16px;
+  transform: none;
+  opacity: 1;
+}
+.toast.flash-message.hiding {
+  opacity: 0;
+  transform: translateY(-8px);
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  max-height: 0;
+  overflow: hidden;
+}
 .toast.booking-notice {
   position: static;
   display: none;

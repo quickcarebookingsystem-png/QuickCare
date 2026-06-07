@@ -7,7 +7,7 @@ app_start('admin', 'payment');
 $pending_payments = get_pending_payments();
 $all_payments = get_all_payments();
 $admin_queue_count = count(array_filter($all_payments, function($p) {
-    return in_array($p['payment_status'], ['verifying', 'pending', 'refund_requested'], true);
+    return in_array($p['payment_status'], ['verifying', 'refund_requested'], true);
 }));
 ?>
 
@@ -56,15 +56,24 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
         </div>
     </div>
 
-    <!-- Filter Tabs -->
-    <div class="filter-tabs">
-        <button class="tab-btn active" data-filter="all">All</button>
-        <button class="tab-btn" data-filter="verifying">Verifying ⏳</button>
-        <button class="tab-btn" data-filter="approved">Approved ✅</button>
-        <button class="tab-btn" data-filter="rejected">Rejected ❌</button>
-        <button class="tab-btn" data-filter="refund_requested">Refund Requests</button>
-        <button class="tab-btn" data-filter="refunded">Refunded</button>
-        <button class="tab-btn" data-filter="refund_rejected">Refund Rejected</button>
+    <div class="toolbar">
+        <div class="search-input-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="form-control" id="searchPayment" placeholder="Search payments...">
+        </div>
+        <div class="filter-group">
+            <select class="filter-select payment-filter-select" id="paymentStatusFilter">
+                <option value="queue" selected>Action Required</option>
+                <option value="all">All Status</option>
+                <option value="pending">Pending</option>
+                <option value="verifying">Verifying</option>
+                <option value="approved">Paid</option>
+                <option value="rejected">Rejected</option>
+                <option value="refund_requested">Refund Requests</option>
+                <option value="refunded">Refunded</option>
+                <option value="refund_rejected">Refund Rejected</option>
+            </select>
+        </div>
     </div>
 
     <!-- Payments Table -->
@@ -88,8 +97,11 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                     <?php foreach ($all_payments as $payment): ?>
                     <?php
                         $paymentStatus = strtolower((string) $payment['payment_status']);
+                        $paymentId = (int)($payment['payment_id'] ?? 0);
                         $paymentGroup = $paymentStatus;
-                        if (in_array($paymentStatus, ['pending', 'verifying'], true)) {
+                        if ($paymentStatus === 'pending') {
+                            $paymentGroup = 'pending';
+                        } elseif ($paymentStatus === 'verifying') {
                             $paymentGroup = 'verifying';
                         } elseif (in_array($paymentStatus, ['paid', 'approved'], true)) {
                             $paymentGroup = 'approved';
@@ -99,8 +111,14 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                             $paymentGroup = 'refund_rejected';
                         }
                         $badgeStatus = $paymentStatus === 'approved' ? 'paid' : str_replace('_', '-', $paymentStatus);
+                        $refundReceiptFile = payment_refund_receipt_file($payment['remarks'] ?? '');
+                        $receiptToView = ($paymentStatus === 'refunded' && $refundReceiptFile !== '')
+                            ? $refundReceiptFile
+                            : ($payment['receipt_image'] ?? '');
+                        $refundNote = payment_note_display($paymentStatus, $payment['remarks'] ?? '');
+                        $refundNoteText = $refundNote['text'] ?? '';
                     ?>
-                    <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>" data-id="<?php echo $payment['payment_id']; ?>">
+                    <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>" data-id="<?php echo $paymentId; ?>">
                         <td><?php echo date('d M Y, h:i A', strtotime($payment['payment_date'])); ?></td>
                         <td><?php echo htmlspecialchars($payment['receipt_number']); ?></td>
                         <td><?php echo htmlspecialchars($payment['patient_name']); ?></td>
@@ -109,23 +127,27 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                         <td><?php echo htmlspecialchars($payment['transaction_id']); ?></td>
                         <td><?php echo badge($badgeStatus); ?></td>
                         <td>
-                            <button class="btn-view" onclick="viewReceipt('<?php echo $payment['receipt_image']; ?>')">
-                                View
-                            </button>
+                            <?php if (!empty($receiptToView)): ?>
+                                <button class="btn-view" onclick='viewReceipt(<?php echo json_encode($receiptToView); ?>, <?php echo json_encode($refundNoteText); ?>)'>
+                                    View
+                                </button>
+                            <?php else: ?>
+                                <span class="text-muted">-</span>
+                            <?php endif; ?>
                         </td>
                         <td class="actions-cell">
-                            <?php if (in_array($payment['payment_status'], ['verifying', 'pending'], true)): ?>
-                                <button class="btn-approve" onclick="approvePayment(<?php echo $payment['payment_id']; ?>)">
+                            <?php if ($paymentStatus === 'verifying' && $paymentId > 0): ?>
+                                <button class="btn-approve" onclick="approvePayment(<?php echo $paymentId; ?>)">
                                     Approve
                                 </button>
-                                <button class="btn-reject" onclick="showRejectModal(<?php echo $payment['payment_id']; ?>)">
+                                <button class="btn-reject" onclick="showRejectModal(<?php echo $paymentId; ?>)">
                                     Reject
                                 </button>
-                            <?php elseif ($payment['payment_status'] === 'refund_requested'): ?>
-                                <button class="btn-approve" onclick="showRefundModal(<?php echo $payment['payment_id']; ?>)">
+                            <?php elseif ($paymentStatus === 'refund_requested' && $paymentId > 0): ?>
+                                <button class="btn-approve" onclick='showRefundModal(<?php echo $paymentId; ?>, <?php echo json_encode($refundNoteText); ?>)'>
                                     Approve
                                 </button>
-                                <button class="btn-reject" onclick="showRejectRefundModal(<?php echo $payment['payment_id']; ?>)">
+                                <button class="btn-reject" onclick='showRejectRefundModal(<?php echo $paymentId; ?>, <?php echo json_encode($refundNoteText); ?>)'>
                                     Reject
                                 </button>
                             <?php else: ?>
@@ -148,7 +170,8 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
             <button class="modal-close" onclick="closeReceiptViewModal()">✕</button>
         </div>
         <div class="modal-body" style="text-align: center;">
-            <img id="receiptImage" src="" style="max-width: 100%; border-radius: 8px;">
+            <div class="receipt-preview-card" id="receiptPreviewContent"></div>
+            <div class="refund-reason-box receipt-refund-reason" id="receiptRefundReasonBox"></div>
         </div>
     </div>
 </div>
@@ -221,6 +244,7 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
             <button class="modal-close" onclick="closeRejectRefundModal()">X</button>
         </div>
         <div class="modal-body">
+            <div class="refund-reason-box" id="rejectRefundRequestReasonBox"></div>
             <p>Please provide a reason for rejecting this refund request:</p>
             <textarea id="rejectRefundReason" class="form-control" rows="3" placeholder="e.g., Refund conditions not met"></textarea>
             <input type="hidden" id="rejectRefundPaymentId">
@@ -291,6 +315,10 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
     gap: 10px;
     margin-bottom: 20px;
     flex-wrap: wrap;
+}
+
+.payment-filter-select {
+    width: 220px;
 }
 
 .tab-btn {
@@ -542,6 +570,64 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
     margin-top: 8px;
 }
 
+.refund-reason-box {
+    margin: 12px 0 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface2);
+    color: var(--text);
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+
+.receipt-refund-reason {
+    margin-bottom: 0;
+    text-align: left;
+}
+
+.receipt-preview-card {
+    min-height: 180px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.receipt-preview-card img {
+    max-width: 100%;
+    max-height: 70vh;
+    border-radius: 8px;
+    object-fit: contain;
+}
+
+.receipt-preview-card .btn {
+    width: auto;
+}
+
+.file-open-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    width: 100%;
+    min-height: 160px;
+    text-align: center;
+}
+
+.file-open-fallback p {
+    margin: 0;
+    color: var(--text-muted);
+}
+
+.refund-reason-box:empty {
+    display: none;
+}
+
 @media (max-width: 768px) {
     .stats-summary {
         grid-template-columns: repeat(2, 1fr);
@@ -562,33 +648,88 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
 </style>
 
 <script>
+function showPaymentNotification(message, type = 'success', reload = false) {
+    const container = document.querySelector('.admin-payment-container') || document.body;
+    document.querySelectorAll('.payment-flash-message').forEach(messageBox => messageBox.remove());
+
+    const notice = document.createElement('div');
+    notice.className = `toast flash-message show ${type} payment-flash-message`;
+    notice.textContent = message;
+    container.prepend(notice);
+
+    if (container !== document.body) {
+        notice.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    if (reload) {
+        setTimeout(() => window.location.reload(), 5000);
+        return;
+    }
+
+    setTimeout(() => {
+        notice.classList.add('hiding');
+        setTimeout(() => notice.remove(), 350);
+    }, 5000);
+}
+
 function filterPayments(status) {
+    const searchValue = document.getElementById('searchPayment')?.value.toLowerCase() || '';
     const rows = document.querySelectorAll('#paymentsTableBody tr');
     rows.forEach(row => {
-        if (status === 'all' || row.dataset.status === status) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
+        const matchesSearch = !searchValue || row.innerText.toLowerCase().includes(searchValue);
+        let matchesStatus = false;
+
+        if (status === 'queue') {
+            matchesStatus = ['verifying', 'refund_requested'].includes(row.dataset.status);
+        } else if (status === 'all' || row.dataset.status === status) {
+            matchesStatus = true;
         }
+
+        row.style.display = matchesSearch && matchesStatus ? '' : 'none';
     });
 }
 
-document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        this.classList.add('active');
-        filterPayments(this.dataset.filter);
-    });
+document.getElementById('paymentStatusFilter')?.addEventListener('change', function() {
+    filterPayments(this.value);
 });
 
-function viewReceipt(receiptImage) {
+document.getElementById('searchPayment')?.addEventListener('keyup', function() {
+    filterPayments(document.getElementById('paymentStatusFilter')?.value || 'queue');
+});
+
+function initPaymentFilter() {
+    const filter = document.getElementById('paymentStatusFilter');
+    if (!filter) return;
+
+    const hasActionRequired = Array.from(document.querySelectorAll('#paymentsTableBody tr'))
+        .some(row => ['verifying', 'refund_requested'].includes(row.dataset.status));
+
+    if (!hasActionRequired && filter.value === 'queue') {
+        filter.value = 'all';
+    }
+    filterPayments(filter.value || 'queue');
+}
+
+initPaymentFilter();
+
+function viewReceipt(receiptImage, reason = '') {
     if (!receiptImage) {
         alert('No receipt image available');
         return;
     }
     const modal = document.getElementById('receiptViewModal');
-    const img = document.getElementById('receiptImage');
-    img.src = '../uploads/receipts/' + receiptImage;
+    const content = document.getElementById('receiptPreviewContent');
+    const reasonBox = document.getElementById('receiptRefundReasonBox');
+    const receiptUrl = '../uploads/receipts/' + encodeURIComponent(receiptImage);
+    const extension = receiptImage.split('.').pop().toLowerCase();
+    if (content) {
+        if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) {
+            content.innerHTML = `<img src="${receiptUrl}" alt="Payment receipt">`;
+        } else {
+            content.innerHTML = `<div class="file-open-fallback"><p>This payment proof file cannot be previewed here.</p><a class="btn btn-outline" target="_blank" rel="noopener" href="${receiptUrl}">Open File</a></div>`;
+        }
+    }
+    if (reasonBox) reasonBox.textContent = formatRefundRequestReason(reason);
     modal.style.display = 'flex';
 }
 
@@ -618,10 +759,10 @@ function confirmApprovePayment() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert('Payment approved successfully! Email sent to patient.');
-            location.reload();
+            closeApproveModal();
+            showPaymentNotification('Payment approved successfully! Email sent to patient.', 'success', true);
         } else {
-            alert('Error: ' + data.message);
+            showPaymentNotification('Error: ' + data.message, 'error');
         }
     });
 }
@@ -654,17 +795,21 @@ function confirmReject() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert('Payment rejected. Email sent to patient.');
-            location.reload();
+            closeRejectModal();
+            showPaymentNotification('Payment rejected. Email sent to patient.', 'success', true);
         } else {
-            alert('Error: ' + data.message);
+            showPaymentNotification('Error: ' + data.message, 'error');
         }
     });
 }
 
 let refundPaymentId = null;
 
-function showRefundModal(paymentId) {
+function formatRefundRequestReason(reason) {
+    return reason ? `Refund Details:\n${reason}` : '';
+}
+
+function showRefundModal(paymentId, reason = '') {
     refundPaymentId = paymentId;
     document.getElementById('refundReceipt').value = '';
     document.getElementById('refundModal').style.display = 'flex';
@@ -709,19 +854,20 @@ function confirmRefund() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert('Refund approved. Email sent to patient.');
-            location.reload();
+            closeRefundModal();
+            showPaymentNotification('Refund approved. Email sent to patient.', 'success', true);
         } else {
-            alert('Error: ' + data.message);
+            showPaymentNotification('Error: ' + data.message, 'error');
         }
     });
 }
 
 let rejectRefundPaymentId = null;
 
-function showRejectRefundModal(paymentId) {
+function showRejectRefundModal(paymentId, reason = '') {
     rejectRefundPaymentId = paymentId;
     document.getElementById('rejectRefundReason').value = '';
+    document.getElementById('rejectRefundRequestReasonBox').textContent = formatRefundRequestReason(reason);
     document.getElementById('rejectRefundModal').style.display = 'flex';
 }
 
@@ -745,10 +891,10 @@ function confirmRejectRefund() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert('Refund request rejected. Email sent to patient.');
-            location.reload();
+            closeRejectRefundModal();
+            showPaymentNotification('Refund request rejected. Email sent to patient.', 'success', true);
         } else {
-            alert('Error: ' + data.message);
+            showPaymentNotification('Error: ' + data.message, 'error');
         }
     });
 }

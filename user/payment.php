@@ -440,6 +440,30 @@ function updateAmount() {
     }
 }
 
+function showPaymentNotice(message, type = 'success', redirectUrl = '') {
+    const form = document.getElementById('paymentForm');
+    const anchor = form?.closest('.card') || form || document.body;
+    document.querySelectorAll('.payment-flash-message').forEach(messageBox => messageBox.remove());
+
+    const notice = document.createElement('div');
+    notice.className = `toast flash-message show ${type} payment-flash-message`;
+    notice.textContent = message;
+    anchor.parentNode.insertBefore(notice, anchor);
+    notice.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+    if (redirectUrl) {
+        setTimeout(() => {
+            window.location.href = redirectUrl;
+        }, 5000);
+        return;
+    }
+
+    setTimeout(() => {
+        notice.classList.add('hiding');
+        setTimeout(() => notice.remove(), 350);
+    }, 5000);
+}
+
 // Handle form submission
 document.getElementById('paymentForm')?.addEventListener('submit', async function(e) {
     e.preventDefault();
@@ -449,7 +473,7 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
     const maxReceiptSize = 2 * 1024 * 1024;
 
     if (receiptFile && receiptFile.size > maxReceiptSize) {
-        alert('Receipt file is too large. Please upload a file 2MB or smaller.');
+        showPaymentNotice('Receipt file is too large. Please upload a file 2MB or smaller.', 'error');
         receiptInput.focus();
         return;
     }
@@ -469,10 +493,9 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
     const result = await response.json();
     
     if (result.success) {
-        alert('Payment submitted! Waiting for admin approval.');
-        window.location.href = '<?php echo e(page_url('payment_history', 'user')); ?>';
+        showPaymentNotice('Payment submitted! Waiting for admin approval.', 'success', '<?php echo e(page_url('payment_history', 'user')); ?>');
     } else {
-        alert('Error: ' + result.message);
+        showPaymentNotice('Error: ' + result.message, 'error');
     }
 });
 

@@ -12,15 +12,24 @@ $payments = get_all_payments();
         <p>Staff View Only</p>
     </div>
 
-    <!-- Filter Tabs -->
-    <div class="filter-tabs">
-        <button class="tab-btn active" data-filter="all">All</button>
-        <button class="tab-btn" data-filter="verifying">Verifying ⏳</button>
-        <button class="tab-btn" data-filter="approved">Approved ✅</button>
-        <button class="tab-btn" data-filter="rejected">Rejected ❌</button>
-        <button class="tab-btn" data-filter="refund_requested">Refund Requests</button>
-        <button class="tab-btn" data-filter="refunded">Refunded</button>
-        <button class="tab-btn" data-filter="refund_rejected">Refund Rejected</button>
+    <div class="toolbar">
+        <div class="search-input-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="form-control" id="searchPayment" placeholder="Search payments...">
+        </div>
+        <div class="filter-group">
+            <select class="filter-select payment-filter-select" id="paymentStatusFilter">
+                <option value="queue" selected>Action Required</option>
+                <option value="all">All Status</option>
+                <option value="pending">Pending</option>
+                <option value="verifying">Verifying</option>
+                <option value="approved">Paid</option>
+                <option value="rejected">Rejected</option>
+                <option value="refund_requested">Refund Requests</option>
+                <option value="refunded">Refunded</option>
+                <option value="refund_rejected">Refund Rejected</option>
+            </select>
+        </div>
     </div>
 
     <!-- Payments Table -->
@@ -43,9 +52,12 @@ $payments = get_all_payments();
                     <?php foreach ($payments as $payment): ?>
                     <?php
                         $paymentStatus = strtolower((string) $payment['payment_status']);
+                        $paymentId = (int)($payment['payment_id'] ?? 0);
                         $badgeStatus = $paymentStatus === 'approved' ? 'paid' : str_replace('_', '-', $paymentStatus);
                         $paymentGroup = $badgeStatus;
-                        if (in_array($paymentStatus, ['pending', 'verifying'], true)) {
+                        if ($paymentStatus === 'pending') {
+                            $paymentGroup = 'pending';
+                        } elseif ($paymentStatus === 'verifying') {
                             $paymentGroup = 'verifying';
                         } elseif (in_array($paymentStatus, ['paid', 'approved'], true)) {
                             $paymentGroup = 'approved';
@@ -56,6 +68,10 @@ $payments = get_all_payments();
                         } elseif ($paymentStatus === 'refund_rejected') {
                             $paymentGroup = 'refund_rejected';
                         }
+                        $refundReceiptFile = payment_refund_receipt_file($payment['remarks'] ?? '');
+                        $receiptToView = ($paymentStatus === 'refunded' && $refundReceiptFile !== '')
+                            ? $refundReceiptFile
+                            : ($payment['receipt_image'] ?? '');
                     ?>
                     <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>">
                         <td><?php echo date('d M Y', strtotime($payment['payment_date'])); ?></td>
@@ -67,14 +83,22 @@ $payments = get_all_payments();
                             <?php echo badge($badgeStatus); ?>
                         </td>
                         <td>
-                            <button class="btn-view" onclick="viewReceipt('<?php echo $payment['receipt_image']; ?>')">
-                                📷 View
-                            </button>
+                            <?php if (!empty($receiptToView)): ?>
+                                <button class="btn-view" onclick='viewReceipt(<?php echo json_encode($receiptToView); ?>)'>
+                                    📷 View
+                                </button>
+                            <?php else: ?>
+                                <span class="text-muted">-</span>
+                            <?php endif; ?>
                         </td>
                         <td>
-                            <button class="btn-view-details" onclick="viewDetails(<?php echo $payment['payment_id']; ?>)">
-                                👁️ View
-                            </button>
+                            <?php if ($paymentId > 0): ?>
+                                <button class="btn-view-details" onclick="viewDetails(<?php echo $paymentId; ?>)">
+                                    👁️ View
+                                </button>
+                            <?php else: ?>
+                                <span class="text-muted">-</span>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -92,7 +116,7 @@ $payments = get_all_payments();
             <button class="modal-close" onclick="closeReceiptViewModal()">✕</button>
         </div>
         <div class="modal-body" style="text-align: center;">
-            <img id="receiptImage" src="" style="max-width: 100%; border-radius: 8px;">
+            <div class="receipt-preview-card" id="receiptPreviewContent"></div>
         </div>
     </div>
 </div>
@@ -141,6 +165,10 @@ $payments = get_all_payments();
     gap: 10px;
     margin-bottom: 20px;
     flex-wrap: wrap;
+}
+
+.payment-filter-select {
+    width: 220px;
 }
 
 .tab-btn {
@@ -332,6 +360,44 @@ $payments = get_all_payments();
     color: var(--text);
 }
 
+.receipt-preview-card {
+    min-height: 180px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.receipt-preview-card img {
+    max-width: 100%;
+    max-height: 70vh;
+    border-radius: 8px;
+    object-fit: contain;
+}
+
+.receipt-preview-card .btn {
+    width: auto;
+}
+
+.file-open-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    width: 100%;
+    min-height: 160px;
+    text-align: center;
+}
+
+.file-open-fallback p {
+    margin: 0;
+    color: var(--text-muted);
+}
+
 @media (max-width: 768px) {
     .payments-table th,
     .payments-table td {
@@ -347,23 +413,44 @@ $payments = get_all_payments();
 
 <script>
 function filterPayments(status) {
+    const searchValue = document.getElementById('searchPayment')?.value.toLowerCase() || '';
     const rows = document.querySelectorAll('#paymentsTableBody tr');
     rows.forEach(row => {
-        if (status === 'all' || row.dataset.status === status) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
+        const matchesSearch = !searchValue || row.innerText.toLowerCase().includes(searchValue);
+        let matchesStatus = false;
+
+        if (status === 'queue') {
+            matchesStatus = ['verifying', 'refund_requested'].includes(row.dataset.status);
+        } else if (status === 'all' || row.dataset.status === status) {
+            matchesStatus = true;
         }
+
+        row.style.display = matchesSearch && matchesStatus ? '' : 'none';
     });
 }
 
-document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        this.classList.add('active');
-        filterPayments(this.dataset.filter);
-    });
+document.getElementById('paymentStatusFilter')?.addEventListener('change', function() {
+    filterPayments(this.value);
 });
+
+document.getElementById('searchPayment')?.addEventListener('keyup', function() {
+    filterPayments(document.getElementById('paymentStatusFilter')?.value || 'queue');
+});
+
+function initPaymentFilter() {
+    const filter = document.getElementById('paymentStatusFilter');
+    if (!filter) return;
+
+    const hasActionRequired = Array.from(document.querySelectorAll('#paymentsTableBody tr'))
+        .some(row => ['verifying', 'refund_requested'].includes(row.dataset.status));
+
+    if (!hasActionRequired && filter.value === 'queue') {
+        filter.value = 'all';
+    }
+    filterPayments(filter.value || 'queue');
+}
+
+initPaymentFilter();
 
 function viewReceipt(receiptImage) {
     if (!receiptImage) {
@@ -371,8 +458,16 @@ function viewReceipt(receiptImage) {
         return;
     }
     const modal = document.getElementById('receiptViewModal');
-    const img = document.getElementById('receiptImage');
-    img.src = '../uploads/receipts/' + receiptImage;
+    const content = document.getElementById('receiptPreviewContent');
+    const receiptUrl = '../uploads/receipts/' + encodeURIComponent(receiptImage);
+    const extension = receiptImage.split('.').pop().toLowerCase();
+    if (content) {
+        if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) {
+            content.innerHTML = `<img src="${receiptUrl}" alt="Payment receipt">`;
+        } else {
+            content.innerHTML = `<div class="file-open-fallback"><p>This payment proof file cannot be previewed here.</p><a class="btn btn-outline" target="_blank" rel="noopener" href="${receiptUrl}">Open File</a></div>`;
+        }
+    }
     modal.style.display = 'flex';
 }
 

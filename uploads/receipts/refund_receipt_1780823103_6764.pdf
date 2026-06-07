@@ -1,0 +1,124 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1113 >>
+stream
+BT /F1 18 Tf 50 800 Td (QuickCare Report) Tj ET
+BT /F1 10 Tf 50 776 Td (Generated: 07 Jun 2026, 11:11) Tj ET
+BT /F1 10 Tf 50 760 Td (Period: June 2026) Tj ET
+BT /F1 14 Tf 50 726 Td (Appointment Report) Tj ET
+BT /F1 10 Tf 60 704 Td (Total: 7) Tj ET
+BT /F1 10 Tf 180 704 Td (Completed: 1) Tj ET
+BT /F1 10 Tf 330 704 Td (Pending: 1) Tj ET
+BT /F1 10 Tf 450 704 Td (Cancelled: 5) Tj ET
+BT /F1 10 Tf 60 674 Td (Month) Tj ET
+BT /F1 10 Tf 230 674 Td (Total) Tj ET
+BT /F1 10 Tf 310 674 Td (Completed) Tj ET
+BT /F1 10 Tf 430 674 Td (Rate) Tj ET
+BT /F1 10 Tf 60 656 Td (June 2026) Tj ET
+BT /F1 10 Tf 230 656 Td (7) Tj ET
+BT /F1 10 Tf 310 656 Td (1) Tj ET
+BT /F1 10 Tf 430 656 Td (14%) Tj ET
+BT /F1 14 Tf 50 616 Td (Payment Report) Tj ET
+BT /F1 10 Tf 60 594 Td (Total Revenue: RM 0.00) Tj ET
+BT /F1 10 Tf 250 594 Td (Paid Invoices: 0) Tj ET
+BT /F1 10 Tf 410 594 Td (Pending: RM 210.00) Tj ET
+BT /F1 10 Tf 60 564 Td (Month) Tj ET
+BT /F1 10 Tf 230 564 Td (Revenue) Tj ET
+BT /F1 10 Tf 360 564 Td (Invoices) Tj ET
+BT /F1 10 Tf 60 546 Td (June 2026) Tj ET
+BT /F1 10 Tf 230 546 Td (RM 0.00) Tj ET
+BT /F1 10 Tf 360 546 Td (0) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 2325 >>
+stream
+BT /F1 16 Tf 50 800 Td (All Appointments) Tj ET
+BT /F1 8 Tf 40 772 Td (Code) Tj ET
+BT /F1 8 Tf 105 772 Td (Patient) Tj ET
+BT /F1 8 Tf 210 772 Td (Doctor) Tj ET
+BT /F1 8 Tf 325 772 Td (Date) Tj ET
+BT /F1 8 Tf 390 772 Td (Time) Tj ET
+BT /F1 8 Tf 440 772 Td (Status) Tj ET
+BT /F1 8 Tf 500 772 Td (Payment) Tj ET
+BT /F1 8 Tf 40 756 Td (APT-0023) Tj ET
+BT /F1 8 Tf 105 756 Td (Ng Shuzheng) Tj ET
+BT /F1 8 Tf 210 756 Td (Dr. Amir Hamzah) Tj ET
+BT /F1 8 Tf 325 756 Td (2026-06-12) Tj ET
+BT /F1 8 Tf 390 756 Td (12:00) Tj ET
+BT /F1 8 Tf 440 756 Td (confirmed) Tj ET
+BT /F1 8 Tf 500 756 Td (verifying) Tj ET
+BT /F1 8 Tf 40 742 Td (APT-0022) Tj ET
+BT /F1 8 Tf 105 742 Td (Ng Shuzheng) Tj ET
+BT /F1 8 Tf 210 742 Td (Dr. Amir Hamzah) Tj ET
+BT /F1 8 Tf 325 742 Td (2026-06-18) Tj ET
+BT /F1 8 Tf 390 742 Td (12:00) Tj ET
+BT /F1 8 Tf 440 742 Td (cancelled) Tj ET
+BT /F1 8 Tf 500 742 Td (unpaid) Tj ET
+BT /F1 8 Tf 40 728 Td (APT-0021) Tj ET
+BT /F1 8 Tf 105 728 Td (Ng Shuzheng) Tj ET
+BT /F1 8 Tf 210 728 Td (Dr. Amir Hamzah) Tj ET
+BT /F1 8 Tf 325 728 Td (2026-06-10) Tj ET
+BT /F1 8 Tf 390 728 Td (10:00) Tj ET
+BT /F1 8 Tf 440 728 Td (cancelled) Tj ET
+BT /F1 8 Tf 500 728 Td (unpaid) Tj ET
+BT /F1 8 Tf 40 714 Td (APT-0020) Tj ET
+BT /F1 8 Tf 105 714 Td (Ng Shuzheng) Tj ET
+BT /F1 8 Tf 210 714 Td (Dr. Amir Hamzah) Tj ET
+BT /F1 8 Tf 325 714 Td (2026-06-03) Tj ET
+BT /F1 8 Tf 390 714 Td (10:00) Tj ET
+BT /F1 8 Tf 440 714 Td (cancelled) Tj ET
+BT /F1 8 Tf 500 714 Td (refunded) Tj ET
+BT /F1 8 Tf 40 700 Td (APT-0019) Tj ET
+BT /F1 8 Tf 105 700 Td (Ng Shuzheng) Tj ET
+BT /F1 8 Tf 210 700 Td (Dr. Amir Hamzah) Tj ET
+BT /F1 8 Tf 325 700 Td (2026-06-03) Tj ET
+BT /F1 8 Tf 390 700 Td (10:30) Tj ET
+BT /F1 8 Tf 440 700 Td (cancelled) Tj ET
+BT /F1 8 Tf 500 700 Td (refunded) Tj ET
+BT /F1 8 Tf 40 686 Td (APT-0018) Tj ET
+BT /F1 8 Tf 105 686 Td (Ng Shuzheng) Tj ET
+BT /F1 8 Tf 210 686 Td (Dr. Amir Hamzah) Tj ET
+BT /F1 8 Tf 325 686 Td (2026-06-03) Tj ET
+BT /F1 8 Tf 390 686 Td (10:30) Tj ET
+BT /F1 8 Tf 440 686 Td (cancelled) Tj ET
+BT /F1 8 Tf 500 686 Td (refunded) Tj ET
+BT /F1 8 Tf 40 672 Td (APT-0017) Tj ET
+BT /F1 8 Tf 105 672 Td (Ng Shuzheng) Tj ET
+BT /F1 8 Tf 210 672 Td (Dr. Priya Menon) Tj ET
+BT /F1 8 Tf 325 672 Td (2026-06-02) Tj ET
+BT /F1 8 Tf 390 672 Td (10:30) Tj ET
+BT /F1 8 Tf 440 672 Td (completed) Tj ET
+BT /F1 8 Tf 500 672 Td (paid) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000001411 00000 n 
+0000001537 00000 n 
+0000003913 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+3983
+%%EOF
