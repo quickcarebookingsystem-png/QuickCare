@@ -20,6 +20,8 @@
   --radius-sm: 8px;
   --shadow: 0 2px 16px rgba(124,51,73,0.08);
   --shadow-md: 0 4px 32px rgba(124,51,73,0.12);
+  --page-max: 1120px;
+  --page-pad: clamp(16px, 4vw, 32px);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -377,7 +379,10 @@ textarea.form-control {
 .topbar-actions { display: flex; align-items: center; gap: 12px; }
 
 .page-content {
-  padding: 32px;
+  width: 100%;
+  max-width: calc(var(--page-max) + (var(--page-pad) * 2));
+  margin: 0 auto;
+  padding: 32px var(--page-pad);
   flex: 1;
 }
 
@@ -439,7 +444,7 @@ textarea.form-control {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
   gap: 20px;
 }
 
@@ -1680,6 +1685,13 @@ tbody td { padding: 12px 16px; color: var(--text); }
   .main-content { margin-left: 0; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .topbar {
+    padding: 0 var(--page-pad);
+  }
+  .page-content {
+    padding-top: 24px;
+    padding-bottom: 24px;
+  }
 }
 
 /* ====== LANDING PAGE OVERRIDES ======
@@ -1704,7 +1716,7 @@ tbody td { padding: 12px 16px; color: var(--text); }
   justify-content: space-between;
   gap: 16px;
   min-height: 72px;
-  padding: 14px max(24px, calc((100% - 1120px) / 2));
+  padding: 14px max(var(--page-pad), calc((100% - var(--page-max)) / 2));
   background: rgba(250,248,246,0.92);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(14px);
@@ -1738,9 +1750,14 @@ tbody td { padding: 12px 16px; color: var(--text); }
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .landing-link {
+  display: inline-flex;
+  align-items: center;
   text-decoration: none;
   color: var(--primary);
   font-weight: 500;
@@ -1771,6 +1788,8 @@ tbody td { padding: 12px 16px; color: var(--text); }
   left: 0;
   padding: 8px 0;
   margin-top: 4px;
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
 }
 
 .landing-dropdown-content a {
@@ -1837,11 +1856,11 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 
 .footer-container {
-  max-width: 1120px;
+  max-width: var(--page-max);
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 var(--page-pad);
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1fr;
+  grid-template-columns: minmax(240px, 1.5fr) repeat(2, minmax(160px, 1fr));
   gap: 48px;
 }
 
@@ -1879,9 +1898,9 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 
 .footer-bottom {
-  max-width: 1120px;
+  max-width: var(--page-max);
   margin: 48px auto 0;
-  padding: 24px 24px 0;
+  padding: 24px var(--page-pad) 0;
   border-top: 1px solid var(--border);
   text-align: center;
 }
@@ -1975,12 +1994,12 @@ tbody td { padding: 12px 16px; color: var(--text); }
 
 .landing-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  grid-template-columns: minmax(0, 1.08fr) minmax(300px, 0.92fr);
   align-items: center;
-  gap: 48px;
-  max-width: 1120px;
+  gap: clamp(28px, 5vw, 56px);
+  max-width: var(--page-max);
   margin: 0 auto;
-  padding: 72px 24px 52px;
+  padding: clamp(44px, 7vw, 76px) var(--page-pad) clamp(36px, 5vw, 56px);
 }
 
 .landing-kicker {
@@ -2000,14 +2019,16 @@ tbody td { padding: 12px 16px; color: var(--text); }
   max-width: 680px;
   margin-bottom: 18px;
   color: var(--text);
-  font-size: clamp(2.35rem, 5vw, 4.3rem);
+  font-size: clamp(2.25rem, 7vw, 4.3rem);
   line-height: 1.06;
+  overflow-wrap: anywhere;
 }
 
 .landing-hero p {
   max-width: 620px;
   color: var(--text-muted);
-  font-size: 1.05rem;
+  font-size: clamp(0.98rem, 2vw, 1.05rem);
+  line-height: 1.65;
 }
 
 .landing-actions {
@@ -2028,7 +2049,7 @@ tbody td { padding: 12px 16px; color: var(--text); }
 
 .landing-card {
   width: 100%;
-  max-width: 420px;
+  max-width: min(420px, 100%);
   justify-self: end;
   padding: 34px;
   border: 1px solid var(--border);
@@ -2076,10 +2097,15 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 
 .landing-section {
-  max-width: 1120px;
+  max-width: var(--page-max);
   margin: 0 auto;
-  padding: 26px 24px 64px;
+  padding: clamp(20px, 4vw, 28px) var(--page-pad) clamp(48px, 6vw, 68px);
   scroll-margin-top: 96px;
+}
+
+.landing-constrained {
+  max-width: var(--page-max);
+  margin: 0 auto;
 }
 
 .landing-section-heading {
@@ -2100,7 +2126,7 @@ tbody td { padding: 12px 16px; color: var(--text); }
 }
 
 .landing-services {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: 18px;
 }
 
@@ -2129,7 +2155,7 @@ tbody td { padding: 12px 16px; color: var(--text); }
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  max-width: 1120px;
+  max-width: var(--page-max);
   margin: 0 auto 44px;
   padding: 26px 30px;
   background: var(--surface);
@@ -2153,6 +2179,10 @@ tbody td { padding: 12px 16px; color: var(--text); }
     padding-top: 46px;
   }
 
+  .landing-hero-content {
+    max-width: 680px;
+  }
+
   .landing-card {
     justify-self: center;
     max-width: 520px;
@@ -2167,22 +2197,22 @@ tbody td { padding: 12px 16px; color: var(--text); }
   .landing-header {
     align-items: flex-start;
     flex-direction: column;
-    padding: 14px 20px;
+    padding: 14px var(--page-pad);
   }
 
   .landing-nav {
     width: 100%;
+    justify-content: flex-start;
+    gap: 8px;
   }
 
   .landing-nav-btn {
-    flex: 1;
+    flex: 1 1 calc(50% - 8px);
     min-width: 0;
   }
 
-  .landing-hero,
-  .landing-section {
-    padding-left: 20px;
-    padding-right: 20px;
+  .landing-link {
+    padding: 8px 10px;
   }
 
   .landing-actions,
@@ -2201,8 +2231,56 @@ tbody td { padding: 12px 16px; color: var(--text); }
   }
 
   .landing-cta {
-    margin-left: 20px;
-    margin-right: 20px;
+    margin-left: var(--page-pad);
+    margin-right: var(--page-pad);
     padding: 24px 20px;
+  }
+
+  .landing-check-item {
+    align-items: flex-start;
+  }
+
+  .back-to-top {
+    right: 18px;
+    bottom: 24px;
+  }
+
+  .landing-whatsapp-btn {
+    right: 18px;
+    bottom: 84px;
+  }
+}
+
+@media (max-width: 420px) {
+  .landing-brand {
+    font-size: 1.45rem;
+  }
+
+  .landing-logo-mark {
+    width: 40px;
+    height: 40px;
+  }
+
+  .landing-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .landing-dropdown,
+  .landing-link,
+  .landing-nav-btn {
+    width: 100%;
+  }
+
+  .landing-link,
+  .landing-nav-btn {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .landing-dropdown-content {
+    left: 0;
+    right: auto;
+    min-width: min(260px, calc(100vw - 32px));
   }
 }

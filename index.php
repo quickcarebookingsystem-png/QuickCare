@@ -93,7 +93,7 @@ $landingServices = get_services($conn);
         <h2>Meet Our Doctors</h2>
         <p>Our team of highly qualified specialists is dedicated to providing the best healthcare services for you and your family.</p>
       </div>
-      <div style="max-width: 1120px; margin: 0 auto;">
+      <div class="landing-constrained">
         <?php render_doctors('guest', false); ?>
       </div>
     </section>
@@ -145,7 +145,7 @@ $landingServices = get_services($conn);
   </footer>
 
   <a href="#" class="back-to-top" title="Back to top">↑</a>
-  <a class="landing-whatsapp-btn" href="https://wa.me/601110807180" target="_blank" rel="noopener" aria-label="Chat with customer service on WhatsApp" title="Customer Service WhatsApp" draggable="false">
+    <a class="landing-whatsapp-btn" href="https://wa.me/601110807180" target="_blank" rel="noopener" aria-label="Chat with customer service on WhatsApp" title="Customer Service WhatsApp" draggable="false">
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="M12 3a8 8 0 0 0-8 8v3a3 3 0 0 0 3 3h1v-6H6a6 6 0 0 1 12 0h-2v6h1a3 3 0 0 0 3-3v-3a8 8 0 0 0-8-8Z"/>
       <path d="M9 18h2.2c.3.9 1.1 1.5 2.1 1.5H15a1 1 0 1 0 0-2h-1.7a.5.5 0 0 1-.5-.5v-.2H9V18Z"/>
