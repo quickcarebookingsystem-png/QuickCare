@@ -117,6 +117,7 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                             : ($payment['receipt_image'] ?? '');
                         $refundNote = payment_note_display($paymentStatus, $payment['remarks'] ?? '');
                         $refundNoteText = $refundNote['text'] ?? '';
+                        $paymentMethodText = payment_method_from_payment($payment);
                     ?>
                     <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>" data-id="<?php echo $paymentId; ?>">
                         <td><?php echo date('d M Y, h:i A', strtotime($payment['payment_date'])); ?></td>
@@ -128,7 +129,7 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                         <td><?php echo badge($badgeStatus); ?></td>
                         <td>
                             <?php if (!empty($receiptToView)): ?>
-                                <button class="btn-view" onclick='viewReceipt(<?php echo json_encode($receiptToView); ?>, <?php echo json_encode($refundNoteText); ?>)'>
+                                <button class="btn-view" onclick='viewReceipt(<?php echo json_encode($receiptToView); ?>, <?php echo json_encode($refundNoteText); ?>, <?php echo json_encode($paymentMethodText); ?>)'>
                                     View
                                 </button>
                             <?php else: ?>
@@ -170,6 +171,7 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
             <button class="modal-close" onclick="closeReceiptViewModal()">✕</button>
         </div>
         <div class="modal-body" style="text-align: center;">
+            <div class="payment-method-proof" id="receiptPaymentMethodBox"></div>
             <div class="receipt-preview-card" id="receiptPreviewContent"></div>
             <div class="refund-reason-box receipt-refund-reason" id="receiptRefundReasonBox"></div>
         </div>
@@ -527,6 +529,10 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
     padding: 20px;
 }
 
+#receiptViewModal .modal-body {
+    padding-top: 10px;
+}
+
 .modal-footer {
     padding: 15px 20px;
     border-top: 1px solid var(--border);
@@ -583,6 +589,20 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
 
 .receipt-refund-reason {
     margin-bottom: 0;
+    text-align: left;
+}
+
+.payment-method-proof {
+    display: none;
+    width: fit-content;
+    max-width: 520px;
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: rgba(124, 51, 73, 0.1);
+    color: var(--primary);
+    font-size: 16px;
+    font-weight: 700;
     text-align: left;
 }
 
@@ -712,7 +732,7 @@ function initPaymentFilter() {
 
 initPaymentFilter();
 
-function viewReceipt(receiptImage, reason = '') {
+function viewReceipt(receiptImage, reason = '', paymentMethod = '') {
     if (!receiptImage) {
         alert('No receipt image available');
         return;
@@ -720,6 +740,7 @@ function viewReceipt(receiptImage, reason = '') {
     const modal = document.getElementById('receiptViewModal');
     const content = document.getElementById('receiptPreviewContent');
     const reasonBox = document.getElementById('receiptRefundReasonBox');
+    const paymentMethodBox = document.getElementById('receiptPaymentMethodBox');
     const receiptUrl = '../uploads/receipts/' + encodeURIComponent(receiptImage);
     const extension = receiptImage.split('.').pop().toLowerCase();
     if (content) {
@@ -728,6 +749,10 @@ function viewReceipt(receiptImage, reason = '') {
         } else {
             content.innerHTML = `<div class="file-open-fallback"><p>This payment proof file cannot be previewed here.</p><a class="btn btn-outline" target="_blank" rel="noopener" href="${receiptUrl}">Open File</a></div>`;
         }
+    }
+    if (paymentMethodBox) {
+        paymentMethodBox.textContent = paymentMethod ? `Paid via: ${paymentMethod}` : '';
+        paymentMethodBox.style.display = paymentMethod ? 'block' : 'none';
     }
     if (reasonBox) reasonBox.textContent = formatRefundRequestReason(reason);
     modal.style.display = 'flex';
@@ -899,12 +924,6 @@ function confirmRejectRefund() {
     });
 }
 
-// Close modals when clicking outside
-window.onclick = function(event) {
-    if (event.target.classList.contains('modal-overlay')) {
-        event.target.style.display = 'none';
-    }
-}
 </script>
 
 <?php

@@ -155,9 +155,10 @@ if ($action === 'submit_payment') {
     $appointment_code = $_POST['appointment_code'] ?? '';
     $amount = $_POST['amount'] ?? 0;
     $remarks = $_POST['remarks'] ?? '';
+    $payment_method = trim($_POST['payment_method'] ?? $_POST['payment_method_label'] ?? '');
     
     // Validate input (transaction_id no longer required)
-    if (empty($appointment_code) || empty($amount)) {
+    if (empty($appointment_code) || empty($amount) || $payment_method === '') {
         echo json_encode(['success' => false, 'message' => 'Please fill in all required fields']);
         exit;
     }
@@ -201,7 +202,7 @@ if ($action === 'submit_payment') {
     // Explicitly set uploaded payment status
     $payment_status = 'verifying';
 
-    $result = submit_payment($user_id, $appointment_code, $amount, $transaction_id, $remarks, $receipt_image, $payment_status);
+    $result = submit_payment($user_id, $appointment_code, $amount, $transaction_id, $remarks, $receipt_image, $payment_status, $payment_method);
     
     if ($result) {
         echo json_encode(['success' => true, 'message' => 'Payment submitted. Waiting for admin approval.']);
@@ -266,6 +267,7 @@ if ($action === 'reject_payment') {
 // Handle get payment details (for staff/admin) - AJAX request
 if ($action === 'get_payment_details') {
     global $conn;
+    ensure_payment_method_column($conn);
     
     $payment_id = $_POST['payment_id'] ?? 0;
     
@@ -282,6 +284,10 @@ if ($action === 'get_payment_details') {
     
     if ($payment) {
         $payment_status_label = ucwords(str_replace('_', ' ', (string)$payment['payment_status']));
+        $payment_method = payment_method_from_payment($payment);
+        $payment_method_html = $payment_method !== ''
+            ? '<div class="detail-row"><strong>Payment Method:</strong> ' . htmlspecialchars($payment_method) . '</div>'
+            : '';
         $payment_note = payment_note_display($payment['payment_status'], $payment['remarks'] ?? '');
         $remarks_html = '';
         if ($payment_note['text'] !== '') {
@@ -296,6 +302,7 @@ if ($action === 'get_payment_details') {
             <div class="detail-row"><strong>Status:</strong> ' . htmlspecialchars($payment_status_label) . '</div>
             <div class="detail-row"><strong>Transaction ID:</strong> ' . htmlspecialchars($payment['transaction_id']) . '</div>
             <div class="detail-row"><strong>Appointment Code:</strong> ' . htmlspecialchars($payment['appointment_code']) . '</div>
+            ' . $payment_method_html . '
             ' . $remarks_html . '
             <div class="detail-row"><strong>Submitted:</strong> ' . date('d/m/Y h:i A', strtotime($payment['payment_date'])) . '</div>
         </div>';

@@ -76,6 +76,13 @@ $payments = get_user_payment_history($user_id);
                             <span class="detail-label">Transaction ID:</span>
                             <span class="detail-value"><?php echo htmlspecialchars($payment['transaction_id']); ?></span>
                         </div>
+                        <?php $paymentMethodText = payment_method_from_payment($payment); ?>
+                        <?php if ($paymentMethodText !== ''): ?>
+                        <div class="detail-row">
+                            <span class="detail-label">Payment Method:</span>
+                            <span class="detail-value"><?php echo htmlspecialchars($paymentMethodText); ?></span>
+                        </div>
+                        <?php endif; ?>
                         <?php if (in_array($payment['payment_status'], ['approved', 'paid'], true)): ?>
                         <div class="detail-row">
                             <span class="detail-label">Approved By:</span>
@@ -113,7 +120,7 @@ $payments = get_user_payment_history($user_id);
                     </button>
                     <?php endif; ?>
 
-                    <?php if (($payment['appointment_status'] ?? '') === 'cancelled' && in_array($payment['payment_status'], ['approved', 'paid'], true)): ?>
+                    <?php if (in_array($payment['payment_status'], ['approved', 'paid'], true) && in_array($payment['appointment_status'] ?? '', ['cancelled', 'confirm', 'confirmed'], true)): ?>
                     <button class="btn-print btn-refund-request" onclick="showRefundRequestModal(<?php echo $payment['payment_id']; ?>)">
                         Request Refund
                     </button>

@@ -43,32 +43,32 @@ $selected_appointment = $_GET['appointment'] ?? '';
             </div>
         </div>
 
-        <!-- Step 2: QR Code -->
-        <div class="step-box" id="qrStep" style="display: none;">
+        <!-- Step 2: Payment Details -->
+        <div class="step-box payment-qr-active" id="qrStep" style="display: none;">
             <div class="step-number">2</div>
             <div class="step-content">
-                <h3>Scan QR Code to Pay</h3>
+                <h3>Payment Details</h3>
                 <div class="qr-container">
                     <div class="qr-stack">
                         <div class="qr-code">
-                            <div class="qr-title">Bank QR</div>
-                            <img src="<?php echo e(app_url('uploads/receipts/bank_qr.JPG')); ?>"
-                                 alt="Bank payment QR Code" id="bankQrImage">
-                            <div class="qr-caption">RHB Bank</div>
-                        </div>
-                        <div class="qr-code">
-                            <div class="qr-title">TNG QR</div>
+                            <div class="qr-type-tabs" role="tablist" aria-label="QR type">
+                                <button type="button" class="qr-type-tab active" data-qr-type="tng" role="tab" aria-selected="true">TNG</button>
+                                <button type="button" class="qr-type-tab" data-qr-type="bank" role="tab" aria-selected="false">Bank</button>
+                            </div>
                             <img src="<?php echo e(app_url('uploads/receipts/tng_qr.JPG')); ?>"
-                                 alt="Touch n Go payment QR Code" id="tngQrImage">
-                            <div class="qr-caption">Touch 'n Go eWallet</div>
+                                 alt="Touch n Go payment QR Code"
+                                 id="paymentQrImage"
+                                 data-bank-src="<?php echo e(app_url('uploads/receipts/bank_qr.JPG')); ?>"
+                                 data-tng-src="<?php echo e(app_url('uploads/receipts/tng_qr.JPG')); ?>">
+                            <div class="qr-caption" id="paymentQrCaption">Touch 'n Go eWallet</div>
                         </div>
                     </div>
-                    <div class="payment-details">
-                        <div class="amount-display">
-                            Amount: <strong id="payAmount">RM 0.00</strong>
-                        </div>
-                        <div class="bank-details">
-                            <div class="bank-details-title">Payment Details</div>
+                        <div class="payment-details">
+                            <div class="amount-display">
+                                Amount: <strong id="payAmount">RM 0.00</strong>
+                            </div>
+                            <div class="bank-details">
+                                <div class="bank-details-title">Payment Details</div>
                             <div class="bank-detail-row">
                                 <span class="bank-detail-label">DuitNow ID</span>
                                 <span class="bank-detail-value">150598893567</span>
@@ -102,6 +102,7 @@ $selected_appointment = $_GET['appointment'] ?? '';
                 <form id="paymentForm" enctype="multipart/form-data">
                     <input type="hidden" id="appointmentCode" name="appointment_code">
                     <input type="hidden" id="amount" name="amount">
+                    <input type="hidden" id="paymentMethodLabel" name="payment_method_label">
                     
                     <div class="form-group">
                         <label>Upload Receipt/Screenshot</label>
@@ -218,6 +219,53 @@ $selected_appointment = $_GET['appointment'] ?? '';
     border-radius: 12px;
     text-align: center;
     border: 1px solid var(--border);
+}
+
+.qr-type-tabs {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 4px;
+    margin-bottom: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.qr-type-tabs::before {
+    content: "";
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc((100% - 8px) / 2);
+    background: var(--primary);
+    border-radius: 6px;
+    transition: transform 0.24s ease;
+}
+
+.qr-type-tabs.bank-active::before {
+    transform: translateX(100%);
+}
+
+.qr-type-tab {
+    position: relative;
+    z-index: 1;
+    min-height: 30px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.qr-type-tab.active {
+    color: white;
 }
 
 .qr-title {
@@ -421,6 +469,46 @@ $selected_appointment = $_GET['appointment'] ?? '';
 </style>
 
 <script>
+let currentAppointmentCode = '';
+let selectedQrType = 'tng';
+
+function updatePaymentMethodLabel() {
+    const labelInput = document.getElementById('paymentMethodLabel');
+    if (!labelInput) return;
+
+    labelInput.value = selectedQrType === 'bank' ? 'QR Pay - Bank' : 'QR Pay - TNG';
+}
+
+function resetPaymentMethod() {
+    selectedQrType = 'tng';
+    setQrType('tng');
+    updatePaymentMethodLabel();
+}
+
+function setQrType(type) {
+    const qrTabs = document.querySelector('.qr-type-tabs');
+    const qrImage = document.getElementById('paymentQrImage');
+    const qrCaption = document.getElementById('paymentQrCaption');
+    const isBank = type === 'bank';
+    selectedQrType = isBank ? 'bank' : 'tng';
+
+    qrTabs?.classList.toggle('bank-active', isBank);
+    if (qrImage) {
+        qrImage.src = isBank ? qrImage.dataset.bankSrc : qrImage.dataset.tngSrc;
+        qrImage.alt = isBank ? 'Bank payment QR Code' : 'Touch n Go payment QR Code';
+    }
+    if (qrCaption) {
+        qrCaption.textContent = isBank ? 'RHB Bank' : "Touch 'n Go eWallet";
+    }
+
+    document.querySelectorAll('.qr-type-tab').forEach(tab => {
+        const active = tab.dataset.qrType === type;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    updatePaymentMethodLabel();
+}
+
 function updateAmount() {
     const select = document.getElementById('appointmentSelect');
     const selectedOption = select.options[select.selectedIndex];
@@ -428,13 +516,18 @@ function updateAmount() {
     const appointmentId = selectedOption.value;
     
     if (appointmentId) {
+        if (appointmentId !== currentAppointmentCode) {
+            resetPaymentMethod();
+            currentAppointmentCode = appointmentId;
+        }
         document.getElementById('payAmount').innerHTML = 'RM ' + parseFloat(amount).toFixed(2);
         document.getElementById('appointmentCode').value = appointmentId;
         document.getElementById('amount').value = amount;
-        
         document.getElementById('qrStep').style.display = 'flex';
         document.getElementById('uploadStep').style.display = 'flex';
     } else {
+        resetPaymentMethod();
+        currentAppointmentCode = '';
         document.getElementById('qrStep').style.display = 'none';
         document.getElementById('uploadStep').style.display = 'none';
     }
@@ -482,7 +575,9 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
     formData.append('action', 'submit_payment');
     formData.append('appointment_code', document.getElementById('appointmentCode').value);
     formData.append('amount', document.getElementById('amount').value);
-    formData.append('remarks', document.getElementById('remarks').value);
+    const methodLabel = document.getElementById('paymentMethodLabel').value;
+    formData.append('payment_method', methodLabel);
+    formData.append('remarks', document.getElementById('remarks').value.trim());
     formData.append('receipt', receiptFile);
     
     const response = await fetch('../action.php', {
@@ -500,6 +595,11 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
 });
 
 document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.qr-type-tab').forEach(tab => {
+        tab.addEventListener('click', () => setQrType(tab.dataset.qrType || 'bank'));
+    });
+    setQrType('tng');
+
     const select = document.getElementById('appointmentSelect');
     if (select && select.value) {
         updateAmount();

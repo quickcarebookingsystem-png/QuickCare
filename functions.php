@@ -736,6 +736,7 @@ function doctor_default_description($specialization) {
 }
 
 function get_appointments($conn, $role = null, $appointmentDate = null, $limit = null, $orderByCreatedAt = false) {
+    ensure_payment_method_column($conn);
     $sql = "SELECT appointment_id, appointment_code, name, doctor_name, service_name,
                    appointment_date, appointment_time, appointment_status, payment_status, amount, notes, created_at,
                    (
@@ -766,7 +767,14 @@ function get_appointments($conn, $role = null, $appointmentDate = null, $limit =
                        WHERE p.appointment_code = appointments.appointment_code
                        ORDER BY p.payment_date DESC, p.payment_id DESC
                        LIMIT 1
-                   ) AS latest_payment_remarks
+                   ) AS latest_payment_remarks,
+                   (
+                       SELECT p.payment_method
+                       FROM payments p
+                       WHERE p.appointment_code = appointments.appointment_code
+                       ORDER BY p.payment_date DESC, p.payment_id DESC
+                       LIMIT 1
+                   ) AS latest_payment_method
             FROM appointments";
     $types = '';
     $params = [];
@@ -855,7 +863,7 @@ function render_notification($placement = 'toast') {
             const notification = document.getElementById("pageNotification");
             if (!notification) return;
             notification.classList.remove("show");
-        }, 3500);
+        }, 5000);
         </script>';
     }
     unset($_SESSION['QuickCare_message']);
@@ -895,7 +903,7 @@ async function printReceipt(paymentId) {
         document.getElementById('receiptContent').innerHTML = data.html;
         document.getElementById('receiptModal').style.display = 'flex';
     } else {
-        alert('Error loading receipt');
+        showPaymentHistoryNotice('Error loading receipt.', 'error');
     }
 }
 
@@ -944,10 +952,32 @@ function closeRefundRequestModal() {
     refundRequestPaymentId = null;
 }
 
+function showPaymentHistoryNotice(message, type = 'success', reload = false) {
+    const anchor = document.querySelector('.history-container') || document.body;
+    document.querySelectorAll('.payment-history-flash-message').forEach(messageBox => messageBox.remove());
+
+    const notice = document.createElement('div');
+    notice.className = `toast flash-message show ${type} payment-history-flash-message`;
+    notice.textContent = message;
+    anchor.insertBefore(notice, anchor.firstChild);
+    notice.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+    setTimeout(() => {
+        notice.classList.add('hiding');
+        setTimeout(() => {
+            notice.remove();
+            if (reload) {
+                location.reload();
+            }
+        }, 350);
+    }, 5000);
+}
+
 async function confirmRefundRequest() {
     const reason = document.getElementById('refundRequestReason').value;
     if (!reason.trim()) {
-        alert('Please provide a reason for refund request');
+        showPaymentHistoryNotice('Please provide a reason for refund request.', 'error');
+        document.getElementById('refundRequestReason').focus();
         return;
     }
 
@@ -959,10 +989,10 @@ async function confirmRefundRequest() {
 
     const data = await response.json();
     if (data.success) {
-        alert('Refund request submitted. Please wait for admin approval.');
-        location.reload();
+        closeRefundRequestModal();
+        showPaymentHistoryNotice('Refund request submitted. Please wait for admin approval.', 'success', true);
     } else {
-        alert('Error: ' + data.message);
+        showPaymentHistoryNotice('Error: ' + data.message, 'error');
     }
 }
 </script>
@@ -1070,7 +1100,7 @@ function render_dashboard($role) {
                     $actionData = '" data-complete-url="' . e(action_url('update_status', ['id' => $a['appointment_code']]));
                 }
             }
-            echo '<tr><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e(format_date_display($a['appointment_date'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td><button type="button" class="btn btn-sm btn-outline dashboard-view-btn" onclick="showAppointmentDetails(this)" data-code="' . e($a['appointment_code']) . '" data-patient="' . e($a['name']) . '" data-doctor="' . e($a['doctor_name']) . '" data-service="' . e($a['service_name']) . '" data-date="' . e(format_date_display($a['appointment_date'])) . '" data-time="' . e(format_time_display($a['appointment_time'])) . '" data-notes="' . e(appointment_booking_notes($a['notes'] ?? '')) . '" data-cancel-reason="' . e(appointment_cancel_reason($a['notes'] ?? '')) . '" data-payment-notes="' . e(appointment_payment_notes($a)) . '" data-status="' . e($a['appointment_status']) . '" data-payment="' . e($a['payment_status']) . '" data-amount="RM ' . e(number_format((float) $a['amount'], 2)) . $actionData . '">View</button></td></tr>';
+            echo '<tr><td>' . e($a['name']) . '</td><td>' . e($a['doctor_name']) . '</td><td>' . e(format_date_display($a['appointment_date'])) . '</td><td>' . appointment_badge($a['appointment_status'], $role) . '</td><td><button type="button" class="btn btn-sm btn-outline dashboard-view-btn" onclick="showAppointmentDetails(this)" data-code="' . e($a['appointment_code']) . '" data-patient="' . e($a['name']) . '" data-doctor="' . e($a['doctor_name']) . '" data-service="' . e($a['service_name']) . '" data-date="' . e(format_date_display($a['appointment_date'])) . '" data-time="' . e(format_time_display($a['appointment_time'])) . '" data-notes="' . e(appointment_booking_notes($a['notes'] ?? '')) . '" data-cancel-reason="' . e(appointment_cancel_reason($a['notes'] ?? '')) . '" data-payment-notes="' . e(appointment_payment_notes($a)) . '" data-payment-method="' . e(payment_method_from_payment(['payment_method' => $a['latest_payment_method'] ?? '', 'remarks' => $a['latest_payment_remarks'] ?? ''])) . '" data-status="' . e($a['appointment_status']) . '" data-payment="' . e($a['payment_status']) . '" data-amount="RM ' . e(number_format((float) $a['amount'], 2)) . $actionData . '">View</button></td></tr>';
         }
     }
     echo '</tbody></table></div></div></div></div><div><div class="card mb-20">';
@@ -1108,7 +1138,7 @@ function render_dashboard($role) {
     ];
     foreach ($actions[$role] ?? [] as $a) echo '<a class="btn btn-outline w-full" href="' . e(page_url($a[1], $role)) . '">' . e($a[0]) . '</a>';
     echo '</div></div></div></div></div>';
-    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div><div class="appointment-detail-actions"><button type="button" class="btn btn-danger" id="detailCancelAction" style="display:none;width:auto">Cancel Appointment</button><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button></div></div></div></div>';
+    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Payment Method</span><strong id="detailPaymentMethod"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div><div class="appointment-detail-actions"><button type="button" class="btn btn-danger" id="detailCancelAction" style="display:none;width:auto">Cancel Appointment</button><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button></div></div></div></div>';
     if ($role === 'user') {
         echo '<div class="modal-overlay" id="modal-dashboard-payment-proof"><div class="modal payment-proof-modal"><div class="modal-header"><span class="modal-title">Payment Proof</span><button class="modal-close" onclick="closeModal(\'modal-dashboard-payment-proof\')">×</button></div><div class="modal-body"><div class="payment-proof-card" id="dashboardPaymentProofContent"></div></div></div></div>';
         echo '<div class="modal-overlay" id="modal-dashboard-receipt"><div class="modal receipt-modal"><div class="modal-header"><span class="modal-title">Payment Receipt</span><button class="modal-close" onclick="closeModal(\'modal-dashboard-receipt\')">×</button></div><div class="modal-body" id="dashboardReceiptContent"></div><div class="modal-footer"><button class="btn btn-primary" style="width:auto" onclick="window.print()">Print</button><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-dashboard-receipt\')">Close</button></div></div></div>';
@@ -1134,10 +1164,24 @@ function render_dashboard($role) {
     function setDetailPaymentAction(button) {
         const action = document.getElementById("detailPaymentAction");
         const cancelAction = document.getElementById("detailCancelAction");
+        let refundAction = document.getElementById("detailRefundAction");
+        if (!refundAction && action) {
+            refundAction = document.createElement("button");
+            refundAction.type = "button";
+            refundAction.id = "detailRefundAction";
+            refundAction.textContent = "Request Refund";
+            action.parentNode.insertBefore(refundAction, action);
+        }
         if (!action) return;
         const status = button.dataset.status || "";
         const payment = button.dataset.payment || "";
         const isCancelled = status === "cancelled";
+        if (refundAction) {
+            refundAction.style.display = "none";
+            refundAction.onclick = null;
+            refundAction.className = "btn btn-outline";
+            refundAction.style.width = "auto";
+        }
         if (cancelAction) {
             cancelAction.style.display = "none";
             cancelAction.onclick = null;
@@ -1190,6 +1234,19 @@ function render_dashboard($role) {
             action.onclick = null;
         }
         if (action.onclick) action.style.display = "inline-flex";
+        if (
+            refundAction
+            && "' . e($role) . '" === "user"
+            && ["paid", "approved"].includes(payment)
+            && ["confirm", "confirmed", "cancelled"].includes(status)
+            && Number(button.dataset.receiptId || 0) > 0
+        ) {
+            refundAction.onclick = function () {
+                closeModal("modal-appointment-details");
+                requestAppointmentRefund(Number(button.dataset.receiptId || 0));
+            };
+            refundAction.style.display = "inline-flex";
+        }
     }
     function showAppointmentDetails(button) {
         document.getElementById("detailAppointmentCode").textContent = button.dataset.code || "";
@@ -1198,6 +1255,7 @@ function render_dashboard($role) {
         document.getElementById("detailService").textContent = button.dataset.service || "";
         document.getElementById("detailDate").textContent = button.dataset.date || "";
         document.getElementById("detailTime").textContent = button.dataset.time || "";
+        document.getElementById("detailPaymentMethod").textContent = button.dataset.paymentMethod || "-";
         document.getElementById("detailNotes").textContent = trimDetailNotes(button.dataset.notes);
         const cancelReason = (button.dataset.cancelReason || "").trim();
         let cancelWrap = document.getElementById("detailCancelReasonWrap");
@@ -1346,7 +1404,10 @@ function payment_note_display($status, $remarks) {
     }
 
     $lines = preg_split('/\R+/', $remarks);
-    $lines = array_values(array_filter(array_map('trim', $lines), fn($line) => $line !== ''));
+    $lines = array_values(array_filter(array_map('trim', $lines), fn($line) => $line !== '' && stripos($line, 'Payment method:') !== 0));
+    if (empty($lines)) {
+        return ['label' => '', 'text' => '', 'is_refund' => false];
+    }
 
     if (in_array($status, ['refund_requested', 'refunded', 'refund_rejected'], true)) {
         $refundReason = '';
@@ -1376,14 +1437,79 @@ function payment_note_display($status, $remarks) {
     }
 
     if ($status === 'rejected') {
-        $rejectedLines = array_values(array_filter($lines, fn($line) => stripos($line, 'Rejected:') === 0));
-        $reasonLine = $rejectedLines ? end($rejectedLines) : $remarks;
-        $reason = preg_replace('/^Rejected:\s*/i', '', $reasonLine);
+        $userRemarkLines = [];
+        $rejectReason = '';
 
-        return ['label' => 'Remarks:', 'text' => 'Reject Reason: ' . trim($reason), 'is_refund' => false];
+        foreach ($lines as $line) {
+            if (stripos($line, 'Rejected:') === 0) {
+                $rejectReason = trim(substr($line, strlen('Rejected:')));
+                continue;
+            }
+            $userRemarkLines[] = $line;
+        }
+
+        $displayLines = [];
+        if (!empty($userRemarkLines)) {
+            $displayLines[] = 'User Remarks: ' . implode("\n", $userRemarkLines);
+        }
+        if ($rejectReason !== '') {
+            $displayLines[] = 'Reject Reason: ' . $rejectReason;
+        }
+
+        return ['label' => 'Remarks:', 'text' => implode("\n", $displayLines), 'is_refund' => false];
     }
 
-    return ['label' => 'Remarks:', 'text' => $remarks, 'is_refund' => false];
+    $userRemarkLines = array_values(array_filter($lines, function ($line) {
+        return stripos($line, 'Rejected:') !== 0
+            && stripos($line, 'Refund requested:') !== 0
+            && stripos($line, 'Refund request rejected:') !== 0
+            && stripos($line, 'Refund receipt:') !== 0;
+    }));
+
+    if (empty($userRemarkLines)) {
+        return ['label' => '', 'text' => '', 'is_refund' => false];
+    }
+
+    return ['label' => 'Remarks:', 'text' => implode("\n", $userRemarkLines), 'is_refund' => false];
+}
+
+function payment_method_display($remarks) {
+    $lines = preg_split('/\R+/', (string)$remarks);
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if (stripos($line, 'Payment method:') === 0) {
+            return trim(substr($line, strlen('Payment method:')));
+        }
+    }
+
+    return '';
+}
+
+function payment_method_from_payment($payment) {
+    $method = trim((string)($payment['payment_method'] ?? ''));
+    if ($method !== '') {
+        return $method;
+    }
+
+    return payment_method_display($payment['remarks'] ?? '');
+}
+
+function ensure_payment_method_column($conn) {
+    $columnCheck = $conn->query("SHOW COLUMNS FROM payments LIKE 'payment_method'");
+    if ($columnCheck && $columnCheck->num_rows > 0) {
+        return true;
+    }
+
+    return (bool) $conn->query("ALTER TABLE payments ADD COLUMN payment_method VARCHAR(80) NULL AFTER payment_status");
+}
+
+function clean_payment_remarks($remarks) {
+    $lines = preg_split('/\R+/', (string)$remarks);
+    $lines = array_values(array_filter(array_map('trim', $lines), function ($line) {
+        return $line !== '' && stripos($line, 'Payment method:') !== 0;
+    }));
+
+    return implode("\n", $lines);
 }
 
 function payment_refund_receipt_file($remarks) {
@@ -1815,7 +1941,7 @@ function appointment_actions($role, $a) {
     $refundReceipt = appointment_refund_receipt_file($a);
     $refundProofUrl = $refundReceipt !== '' ? app_url('uploads/receipts/' . rawurlencode($refundReceipt)) : '';
     $refundProofExt = strtolower(pathinfo($refundReceipt, PATHINFO_EXTENSION));
-    $detailsAttrs = ' data-code="' . e($appointmentId) . '" data-patient="' . e($a['name'] ?? '') . '" data-doctor="' . e($a['doctor_name'] ?? '') . '" data-service="' . e($a['service_name'] ?? '') . '" data-date="' . e(format_date_display($a['appointment_date'] ?? '')) . '" data-time="' . e(format_time_display($a['appointment_time'] ?? '')) . '" data-notes="' . e(appointment_booking_notes($a['notes'] ?? '')) . '" data-cancel-reason="' . e(appointment_cancel_reason($a['notes'] ?? '')) . '" data-payment-notes="' . e(appointment_payment_notes($a)) . '" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '" data-refund-proof-url="' . e($refundProofUrl) . '" data-refund-proof-ext="' . e($refundProofExt) . '" data-status="' . e($appointmentStatus) . '" data-payment="' . e($paymentStatus) . '" data-amount="RM ' . e(number_format((float)($a['amount'] ?? 0), 2)) . '"';
+    $detailsAttrs = ' data-code="' . e($appointmentId) . '" data-patient="' . e($a['name'] ?? '') . '" data-doctor="' . e($a['doctor_name'] ?? '') . '" data-service="' . e($a['service_name'] ?? '') . '" data-date="' . e(format_date_display($a['appointment_date'] ?? '')) . '" data-time="' . e(format_time_display($a['appointment_time'] ?? '')) . '" data-notes="' . e(appointment_booking_notes($a['notes'] ?? '')) . '" data-cancel-reason="' . e(appointment_cancel_reason($a['notes'] ?? '')) . '" data-payment-notes="' . e(appointment_payment_notes($a)) . '" data-payment-method="' . e(payment_method_from_payment(['payment_method' => $a['latest_payment_method'] ?? '', 'remarks' => $a['latest_payment_remarks'] ?? ''])) . '" data-proof-url="' . e($paymentProofLink) . '" data-proof-ext="' . e($paymentProofExt) . '" data-refund-proof-url="' . e($refundProofUrl) . '" data-refund-proof-ext="' . e($refundProofExt) . '" data-status="' . e($appointmentStatus) . '" data-payment="' . e($paymentStatus) . '" data-amount="RM ' . e(number_format((float)($a['amount'] ?? 0), 2)) . '"';
 
     if (in_array($role, ['admin', 'staff'], true)) {
         $canComplete = in_array($appointmentStatus, ['confirm', 'confirmed'], true);
@@ -1942,7 +2068,7 @@ function render_appointments($role) {
     }
 
     echo '</tbody></table></div></div>';
-    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div><div class="appointment-detail-actions"><button type="button" class="btn btn-danger" id="detailCancelAction" style="display:none;width:auto">Cancel</button><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button></div></div></div></div>';
+    echo '<div class="modal-overlay" id="modal-appointment-details"><div class="modal appointment-details-modal"><div class="modal-header"><span class="modal-title">Appointment Details</span><button class="modal-close appointment-modal-close" onclick="closeModal(\'modal-appointment-details\')">×</button></div><div class="modal-body"><div class="appointment-detail-code"><span>Appointment ID</span><strong id="detailAppointmentCode"></strong></div><div class="appointment-detail-list"><div><span>Patient</span><strong id="detailPatient"></strong></div><div><span>Doctor</span><strong id="detailDoctor"></strong></div><div><span>Service</span><strong id="detailService"></strong></div><div><span>Date</span><strong id="detailDate"></strong></div><div><span>Time</span><strong id="detailTime"></strong></div><div><span>Status</span><strong id="detailStatus"></strong></div><div><span>Payment</span><strong id="detailPayment"></strong></div><div><span>Payment Method</span><strong id="detailPaymentMethod"></strong></div><div><span>Amount</span><strong class="detail-amount" id="detailAmount"></strong></div><div class="appointment-detail-notes"><span>Notes</span><strong id="detailNotes"></strong></div></div><div class="appointment-detail-actions"><button type="button" class="btn btn-danger" id="detailCancelAction" style="display:none;width:auto">Cancel</button><button type="button" class="btn btn-outline" id="detailPaymentAction" style="display:none;width:auto"></button></div></div></div></div>';
     if ($role === 'user') {
         echo '<div class="modal-overlay" id="modal-edit-notes"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Notes</span><button class="modal-close" onclick="closeModal(\'modal-edit-notes\')">×</button></div><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="save_appointment_notes"><input type="hidden" name="appointment_code" id="editNotesAppointmentCode"><div class="modal-body"><div class="form-group"><label for="editAppointmentNotes">Notes</label><textarea class="form-control" id="editAppointmentNotes" name="notes" rows="7"></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-edit-notes\')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>';
         echo '<div class="modal-overlay" id="modal-cancel-appointment"><div class="modal"><div class="modal-header"><span class="modal-title">Cancel Appointment</span><button class="modal-close" onclick="closeModal(\'modal-cancel-appointment\')">×</button></div><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="cancel_appointment"><input type="hidden" name="id" id="cancelAppointmentCode"><div class="modal-body"><p class="text-muted mb-16">Are you sure you want to cancel this appointment?</p><div class="form-group"><label for="cancelAppointmentReason">Reason</label><textarea class="form-control" id="cancelAppointmentReason" name="reason" rows="4" placeholder="Please tell us why you are cancelling..." required></textarea></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-cancel-appointment\')">Keep Appointment</button><button class="btn btn-danger" style="width:auto">Cancel Appointment</button></div></form></div></div>';
@@ -1975,10 +2101,24 @@ function render_appointments($role) {
     function setDetailPaymentAction(button) {
         const action = document.getElementById("detailPaymentAction");
         const cancelAction = document.getElementById("detailCancelAction");
+        let refundAction = document.getElementById("detailRefundAction");
+        if (!refundAction && action) {
+            refundAction = document.createElement("button");
+            refundAction.type = "button";
+            refundAction.id = "detailRefundAction";
+            refundAction.textContent = "Request Refund";
+            action.parentNode.insertBefore(refundAction, action);
+        }
         if (!action) return;
         const status = button.dataset.status || "";
         const payment = button.dataset.payment || "";
         const isCancelled = status === "cancelled";
+        if (refundAction) {
+            refundAction.style.display = "none";
+            refundAction.onclick = null;
+            refundAction.className = "btn btn-outline";
+            refundAction.style.width = "auto";
+        }
         if (cancelAction) {
             cancelAction.style.display = "none";
             cancelAction.onclick = null;
@@ -2038,6 +2178,19 @@ function render_appointments($role) {
             action.onclick = null;
         }
         if (action.onclick) action.style.display = "inline-flex";
+        if (
+            refundAction
+            && "' . e($role) . '" === "user"
+            && ["paid", "approved"].includes(payment)
+            && ["confirm", "confirmed", "cancelled"].includes(status)
+            && Number(button.dataset.receiptId || 0) > 0
+        ) {
+            refundAction.onclick = function () {
+                closeModal("modal-appointment-details");
+                requestAppointmentRefund(Number(button.dataset.receiptId || 0));
+            };
+            refundAction.style.display = "inline-flex";
+        }
     }
     function showAppointmentDetails(button) {
         document.getElementById("detailAppointmentCode").textContent = button.dataset.code || "";
@@ -2046,6 +2199,7 @@ function render_appointments($role) {
         document.getElementById("detailService").textContent = button.dataset.service || "";
         document.getElementById("detailDate").textContent = button.dataset.date || "";
         document.getElementById("detailTime").textContent = button.dataset.time || "";
+        document.getElementById("detailPaymentMethod").textContent = button.dataset.paymentMethod || "-";
         document.getElementById("detailNotes").textContent = trimDetailNotes(button.dataset.notes);
         const cancelReason = (button.dataset.cancelReason || "").trim();
         let cancelWrap = document.getElementById("detailCancelReasonWrap");
@@ -3106,7 +3260,7 @@ function render_time_slots() {
                 window.setTimeout(function () {
                     notice.remove();
                 }, 350);
-            }, 3500);
+            }, 5000);
         }
         window.openUnlockTimeLockModal = function (button) {
             document.getElementById("unlockTimeLockDoctor").textContent = button.dataset.doctor || "-";
@@ -3883,6 +4037,7 @@ function get_user_pending_payments($user_id) {
 // Get user's payment history
 function get_user_payment_history($user_id) {
     global $conn;
+    ensure_payment_method_column($conn);
     
     $stmt = $conn->prepare("SELECT name FROM users WHERE user_id = ?");
     $stmt->bind_param("i", $user_id);
@@ -3921,6 +4076,7 @@ function get_user_payment_history($user_id) {
 // Get all payments for staff/admin
 function get_all_payments() {
     global $conn;
+    ensure_payment_method_column($conn);
     
     $query = "SELECT p.*, 
               u.name as patient_name, 
@@ -3948,8 +4104,9 @@ function get_all_payments() {
              a.appointment_code,
              '-' AS receipt_number,
              a.amount,
-             'pending' AS payment_status,
-             '-' AS transaction_id,
+              'pending' AS payment_status,
+              '' AS payment_method,
+              '-' AS transaction_id,
              '' AS receipt_image,
              '' AS remarks,
              a.created_at AS payment_date,
@@ -3980,6 +4137,7 @@ function get_all_payments() {
 // Get pending payments for approval (admin)
 function get_pending_payments() {
     global $conn;
+    ensure_payment_method_column($conn);
     
     $query = "SELECT p.*, 
               u.name as patient_name, 
@@ -4015,8 +4173,9 @@ function generate_payment_code() {
 }
 
 // Submit payment (user upload receipt)
-function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $remarks, $receipt_file, $payment_status = 'verifying') {
+function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $remarks, $receipt_file, $payment_status = 'verifying', $payment_method = '') {
     global $conn;
+    ensure_payment_method_column($conn);
     
     // Get appointment details
     $stmt = $conn->prepare("
@@ -4036,13 +4195,16 @@ function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $
     $payment_code = generate_payment_code();
     $receipt_number = generate_receipt_number();
     
+    $remarks = clean_payment_remarks($remarks);
+    $payment_method = trim((string)$payment_method);
+
     $stmt = $conn->prepare("
         INSERT INTO payments (payment_code, user_id, appointment_code, receipt_number, amount, 
-                              payment_status, transaction_id, receipt_image, remarks, payment_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                              payment_status, payment_method, transaction_id, receipt_image, remarks, payment_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     ");
-    $stmt->bind_param("sissdssss", $payment_code, $user_id, $appointment_code, $receipt_number,
-                      $amount, $payment_status, $transaction_id, $receipt_file, $remarks);
+    $stmt->bind_param("sissdsssss", $payment_code, $user_id, $appointment_code, $receipt_number,
+                      $amount, $payment_status, $payment_method, $transaction_id, $receipt_file, $remarks);
     
     $success = $stmt->execute();
     $stmt->close();
@@ -4486,6 +4648,7 @@ function send_refund_rejected_email($user_id, $payment, $reason) {
 // Get receipt HTML for printing
 function get_receipt_html($payment_id) {
     global $conn;
+    ensure_payment_method_column($conn);
     
     $stmt = $conn->prepare("
         SELECT p.*, u.name as user_name, u.email as user_email
@@ -4516,7 +4679,7 @@ function get_receipt_html($payment_id) {
                 <tr><td style="padding: 6px 0;"><strong>Receipt No:</strong></td><td>' . htmlspecialchars($payment['receipt_number']) . '</td></tr>
                 <tr><td style="padding: 6px 0;"><strong>Date:</strong></td><td>' . date('d/m/Y h:i A', strtotime($payment['approved_date'])) . '</td></tr>
                 <tr><td style="padding: 6px 0;"><strong>Patient Name:</strong></td><td>' . htmlspecialchars($payment['user_name']) . '</td></tr>
-                <tr><td style="padding: 6px 0;"><strong>Payment Method:</strong></td><td>QR Code / Online Banking</td></tr>
+                <tr><td style="padding: 6px 0;"><strong>Payment Method:</strong></td><td>' . htmlspecialchars(payment_method_from_payment($payment) ?: 'QR Code / Online Banking') . '</td></tr>
                 <tr><td style="padding: 6px 0;"><strong>Transaction ID:</strong></td><td>' . htmlspecialchars($payment['transaction_id']) . '</td></tr>
                 <tr><td colspan="2"><hr></td></tr>
                 <tr><td style="padding: 6px 0;"><strong>Appointment Code:</strong></td><td>' . htmlspecialchars($payment['appointment_code']) . '</td></tr>

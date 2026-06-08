@@ -332,6 +332,10 @@ $payments = get_all_payments();
     padding: 20px;
 }
 
+#receiptViewModal .modal-body {
+    padding-top: 10px;
+}
+
 .modal-footer {
     padding: 15px 20px;
     border-top: 1px solid var(--border);
@@ -496,12 +500,6 @@ function closeDetailsModal() {
     document.getElementById('detailsModal').style.display = 'none';
 }
 
-// Close modals when clicking outside
-window.onclick = function(event) {
-    if (event.target.classList.contains('modal-overlay')) {
-        event.target.style.display = 'none';
-    }
-}
 </script>
 
 <?php
