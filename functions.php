@@ -2809,9 +2809,11 @@ function render_reports() {
 
     echo '<style>
     .report-page { display: flex; flex-direction: column; gap: 18px; }
-    .report-tabs { display: inline-flex; gap: 6px; padding: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; }
-    .report-tab { border: 0; background: transparent; color: var(--text-muted); padding: 10px 16px; border-radius: 6px; font-weight: 700; cursor: pointer; }
-    .report-tab.active { background: var(--primary); color: #fff; }
+    .report-tabs { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(100%, 390px); padding: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .report-tabs::before { content: ""; position: absolute; top: 6px; bottom: 6px; left: 6px; width: calc((100% - 12px) / 2); background: var(--primary); border-radius: 7px; transition: transform 0.28s ease; }
+    .report-tabs.payments-active::before { transform: translateX(100%); }
+    .report-tab { position: relative; z-index: 1; min-height: 42px; border: 0; background: transparent; color: var(--text-muted); padding: 8px 14px; border-radius: 7px; font-weight: 700; font-size: 0.95rem; line-height: 1.15; text-align: center; white-space: nowrap; cursor: pointer; transition: color 0.2s ease; }
+    .report-tab.active { color: #fff; }
     .report-panel { display: none; }
     .report-panel.active { display: block; }
     .report-hero { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
@@ -2822,7 +2824,7 @@ function render_reports() {
     .report-table-wrap { overflow-x: auto; }
     .report-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     @media (max-width: 900px) { .report-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 640px) { .report-hero { grid-template-columns: 1fr; } .report-tabs { width: 100%; } .report-tab { flex: 1; } }
+    @media (max-width: 640px) { .report-hero { grid-template-columns: 1fr; } .report-tabs { width: 100%; } .report-tab { padding: 8px 10px; font-size: 0.88rem; } }
     </style>';
 
     echo '<div class="report-page">';
@@ -2901,6 +2903,7 @@ function render_reports() {
         const yearSelect = document.getElementById("reportYear");
         const periodSelect = document.getElementById("reportPeriod");
         const exportLinks = document.querySelectorAll(".report-export-link");
+        const tabList = document.querySelector(".report-tabs");
         const tabs = document.querySelectorAll(".report-tab");
         const panels = document.querySelectorAll(".report-panel");
         const baseUrl = ' . json_encode(action_url('export_report')) . ';
@@ -2937,6 +2940,7 @@ function render_reports() {
                 const target = this.dataset.reportTab || "appointments";
                 tabs.forEach(item => item.classList.toggle("active", item === this));
                 panels.forEach(panel => panel.classList.toggle("active", panel.id === `report-panel-${target}`));
+                tabList?.classList.toggle("payments-active", target === "payments");
             });
         });
         document.querySelectorAll(".report-search, .report-status-filter").forEach(control => {
