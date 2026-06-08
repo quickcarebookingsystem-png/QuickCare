@@ -186,8 +186,7 @@ $payments = get_user_payment_history($user_id);
     </div>
 </div>
 
-<?php render_payment_history_scripts(); ?>
-
-<?php
+<?php 
+render_payment_history_scripts();
 app_end();
 ?>
