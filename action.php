@@ -401,9 +401,8 @@ if ($action === 'save_profile' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset
         ensure_profile_image_column($conn);
     }
 
-    if (!empty($_FILES['profile_image']['name'])) {
+    if (!$deleteProfileImage && !empty($_FILES['profile_image']['name'])) {
         ensure_profile_image_column($conn);
-        $deleteProfileImage = false;
 
         if ($_FILES['profile_image']['size'] > 2 * 1024 * 1024) {
             $_SESSION['QuickCare_message'] = 'Profile avatar must be 2MB or smaller.';

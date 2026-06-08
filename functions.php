@@ -3768,10 +3768,9 @@ HTML;
     });
     </script>';
     echo '<div class="modal-overlay" id="modal-edit-profile" data-static-modal="true"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Profile</span><button class="modal-close" onclick="closeModal(\'modal-edit-profile\')">✕</button></div><form method="post" action="' . e(app_url('action.php')) . '" enctype="multipart/form-data"><input type="hidden" name="action" value="save_profile"><div class="modal-body">';
-    echo '<div class="profile-upload-area"><label class="profile-upload-avatar" for="profileImage">' . user_avatar_html($user, 'profile-avatar-lg') . '<span>Change</span></label><input class="profile-file-input" id="profileImage" type="file" name="profile_image" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted profile-upload-note">Upload a square JPG, PNG, or WEBP image. Maximum file size is 2MB.</p>';
-    if (!empty($user['profile_image'])) {
-        echo '<label class="profile-delete-photo"><input type="checkbox" name="delete_profile_image" value="1"> Delete current photo</label>';
-    }
+    $hasProfileImage = !empty($user['profile_image']);
+    echo '<div class="profile-upload-area"><label class="profile-upload-avatar" for="profileImage">' . str_replace('class="profile-avatar-lg', 'id="profileImagePreview" class="profile-avatar-lg', user_avatar_html($user, 'profile-avatar-lg')) . '<span>Change</span></label><input class="profile-file-input" id="profileImage" type="file" name="profile_image" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted profile-upload-note">Upload a square JPG, PNG, or WEBP image. Maximum file size is 2MB.</p>';
+    echo '<input type="hidden" name="delete_profile_image" id="deleteProfileImage" value="0"><button class="profile-delete-photo" type="button" id="deleteProfileImageButton" aria-pressed="false"' . ($hasProfileImage ? '' : ' hidden') . '>Delete current photo</button>';
     echo '</div>';
     echo '<div class="form-group"><label>Full Name</label><input class="form-control" name="name" value="' . e($user['name'] ?? '') . '" required></div>';
     echo '<div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" value="' . e($user['email'] ?? '') . '" required></div>';
@@ -3783,6 +3782,7 @@ HTML;
         echo '<option value="' . e($type) . '"' . ($bloodType === $type ? ' selected' : '') . '>' . e($type) . '</option>';
     }
     echo '</select></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal(\'modal-edit-profile\')">Cancel</button><button class="btn btn-primary" style="width:auto">Save Changes</button></div></form></div></div>';
+    $profileInitials = name_avatar($user['name'] ?? 'User');
     echo '<script>
     function selectServiceEmoji(btn, emoji) {
         const container = btn.closest(".emoji-picker");
@@ -3794,7 +3794,17 @@ HTML;
     document.getElementById("profileImage")?.addEventListener("change", function () {
         const file = this.files && this.files[0];
         if (!file) return;
-        const preview = document.querySelector(".profile-upload-avatar .profile-avatar-lg");
+        const deleteInput = document.getElementById("deleteProfileImage");
+        const deleteButton = document.getElementById("deleteProfileImageButton");
+        if (deleteInput) {
+            deleteInput.value = "0";
+        }
+        if (deleteButton) {
+            deleteButton.hidden = false;
+            deleteButton.classList.remove("active");
+            deleteButton.setAttribute("aria-pressed", "false");
+        }
+        const preview = document.getElementById("profileImagePreview");
         if (!preview) return;
         const reader = new FileReader();
         reader.onload = function (event) {
@@ -3802,8 +3812,21 @@ HTML;
             preview.innerHTML = "<img src=\"" + event.target.result + "\" alt=\"Profile avatar preview\">";
         };
         reader.readAsDataURL(file);
-        const deletePhoto = document.querySelector("input[name=\"delete_profile_image\"]");
-        if (deletePhoto) deletePhoto.checked = false;
+    });
+    document.getElementById("deleteProfileImageButton")?.addEventListener("click", function () {
+        const deleteInput = document.getElementById("deleteProfileImage");
+        if (!deleteInput) return;
+        deleteInput.value = "1";
+        this.classList.remove("active");
+        this.setAttribute("aria-pressed", "false");
+        const fileInput = document.getElementById("profileImage");
+        const preview = document.getElementById("profileImagePreview");
+        if (fileInput) fileInput.value = "";
+        this.hidden = true;
+        if (!preview) return;
+        preview.classList.remove("profile-avatar-image");
+        preview.innerHTML = "";
+        preview.textContent = "' . e($profileInitials) . '";
     });
     </script>';
 }
