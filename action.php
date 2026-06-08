@@ -12,7 +12,17 @@ if ($action === 'register') {
     if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $name = trim($_POST['name']);
         $email = trim($_POST['email']);
-        $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
+        $raw_password = $_POST['password'] ?? '';
+
+        // Validate password criteria
+        if (strlen($raw_password) < 8 || !preg_match('/[0-9]/', $raw_password) || !preg_match('/[A-Z]/', $raw_password) || !preg_match('/[^A-Za-z0-9]/', $raw_password)) {
+            $_SESSION['QuickCare_message'] = "Password must be at least 8 characters and include a number, an uppercase letter, and a special character.";
+            $_SESSION['QuickCare_message_type'] = "error";
+            redirect_to('register.php');
+            exit();
+        }
+
+        $password = password_hash($raw_password, PASSWORD_DEFAULT);
         $role = 'user';
 
         if (email_exist($conn, $email)) {
