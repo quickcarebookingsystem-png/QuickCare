@@ -879,6 +879,96 @@ function app_start($role, $page, $title = null) {
     }
 }
 
+function render_payment_history_scripts() {
+    echo <<<'HTML'
+<script>
+async function printReceipt(paymentId) {
+    const response = await fetch('../action.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `action=get_receipt&payment_id=${paymentId}`
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+        document.getElementById('receiptContent').innerHTML = data.html;
+        document.getElementById('receiptModal').style.display = 'flex';
+    } else {
+        alert('Error loading receipt');
+    }
+}
+
+function closeReceiptModal() {
+    document.getElementById('receiptModal').style.display = 'none';
+}
+
+function viewPaymentProof(receiptImage, title = 'Payment Proof') {
+    const modal = document.getElementById('proofModal');
+    const content = document.getElementById('proofContent');
+    const modalTitle = document.querySelector('#proofModal .modal-title');
+    if (!modal || !content) return;
+    if (modalTitle) modalTitle.textContent = title;
+
+    if (!receiptImage) {
+        content.innerHTML = '<p class="text-muted">No proof uploaded.</p>';
+        modal.style.display = 'flex';
+        return;
+    }
+
+    const proofUrl = '../uploads/receipts/' + encodeURIComponent(receiptImage);
+    const extension = receiptImage.split('.').pop().toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) {
+        content.innerHTML = `<img src="${proofUrl}" alt="${title}">`;
+    } else {
+        content.innerHTML = `<div class="file-open-fallback"><p>This payment proof file cannot be previewed here.</p><a class="btn btn-outline" target="_blank" rel="noopener" href="${proofUrl}">Open File</a></div>`;
+    }
+    modal.style.display = 'flex';
+}
+
+function closeProofModal() {
+    document.getElementById('proofModal').style.display = 'none';
+}
+
+let refundRequestPaymentId = null;
+
+function showRefundRequestModal(paymentId) {
+    refundRequestPaymentId = paymentId;
+    document.getElementById('refundRequestPaymentId').value = paymentId;
+    document.getElementById('refundRequestReason').value = '';
+    document.getElementById('refundRequestModal').style.display = 'flex';
+}
+
+function closeRefundRequestModal() {
+    document.getElementById('refundRequestModal').style.display = 'none';
+    refundRequestPaymentId = null;
+}
+
+async function confirmRefundRequest() {
+    const reason = document.getElementById('refundRequestReason').value;
+    if (!reason.trim()) {
+        alert('Please provide a reason for refund request');
+        return;
+    }
+
+    const response = await fetch('../action.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `action=request_refund&payment_id=${refundRequestPaymentId}&reason=${encodeURIComponent(reason)}`
+    });
+
+    const data = await response.json();
+    if (data.success) {
+        alert('Refund request submitted. Please wait for admin approval.');
+        location.reload();
+    } else {
+        alert('Error: ' + data.message);
+    }
+}
+</script>
+HTML;
+}
+
 function app_end() {
     $scriptVersion = @filemtime(__DIR__ . '/ui.js') ?: time();
     render_modals();
