@@ -3156,6 +3156,7 @@ function render_reports() {
     .report-metric .metric-value { color: var(--primary); font-size: 26px; font-weight: 800; margin-top: 8px; }
     .report-section-title { font-size: 18px; font-weight: 800; margin-bottom: 12px; }
     .report-table-wrap { overflow-x: auto; }
+    .report-page .grid-2 { align-items: start; }
     .report-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     @media (max-width: 900px) { .report-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 640px) { .report-hero { grid-template-columns: 1fr; } .report-tabs { width: 100%; } .report-tab { padding: 8px 10px; font-size: 0.88rem; } }
@@ -3196,13 +3197,13 @@ function render_reports() {
         echo '<tr><td>' . e($row['month_label']) . '</td><td>' . e($total) . '</td><td>' . e($completed) . '</td><td><span class="badge badge-' . e($rateClass) . '">' . e($rate) . '%</span></td></tr>';
     }
     echo '</tbody></table></div></div>';
-    echo '<div class="card"><div class="card-header"><span class="card-title">Appointment Details</span></div><div class="card-body report-table-wrap" style="padding:0"><table><thead><tr><th>ID</th><th>Patient</th><th>Doctor</th><th>Service</th><th>Date</th><th>Status</th><th>Payment</th><th>Amount</th></tr></thead><tbody id="appointmentReportRows">';
+    echo '<div class="card"><div class="card-header"><span class="card-title">Appointment Details</span></div><div class="card-body report-table-wrap"><table><thead><tr><th>ID</th><th>Patient</th><th>Doctor</th><th>Service</th><th>Date</th><th>Status</th><th>Amount</th></tr></thead><tbody id="appointmentReportRows">';
     if (empty($appointmentRows)) {
-        echo '<tr><td colspan="8" style="text-align:center">No appointments found.</td></tr>';
+        echo '<tr><td colspan="7" style="text-align:center">No appointments found.</td></tr>';
     }
     foreach ($appointmentRows as $row) {
         $status = strtolower($row['appointment_status'] ?? '');
-        echo '<tr data-status="' . e($status) . '"><td>' . e($row['appointment_code'] ?? '-') . '</td><td>' . e($row['name'] ?? '-') . '</td><td>' . e($row['doctor_name'] ?? '-') . '</td><td>' . e($row['service_name'] ?? '-') . '</td><td>' . e(format_date_display($row['appointment_date'] ?? '')) . '</td><td>' . badge($status) . '</td><td>' . badge($row['payment_status'] ?? 'pending') . '</td><td>RM ' . e(number_format((float)($row['amount'] ?? 0), 2)) . '</td></tr>';
+        echo '<tr data-status="' . e($status) . '"><td>' . e($row['appointment_code'] ?? '-') . '</td><td>' . e($row['name'] ?? '-') . '</td><td>' . e($row['doctor_name'] ?? '-') . '</td><td>' . e($row['service_name'] ?? '-') . '</td><td>' . e(format_date_display($row['appointment_date'] ?? '')) . '</td><td>' . badge($status) . '</td><td>RM ' . e(number_format((float)($row['amount'] ?? 0), 2)) . '</td></tr>';
     }
     echo '</tbody></table></div></div></div></section>';
 

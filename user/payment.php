@@ -858,6 +858,9 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
         }
 
         if (result.success && result.payment_url) {
+            if (result.bill_code) {
+                sessionStorage.setItem('pendingToyyibPayBill', result.bill_code);
+            }
             window.location.href = result.payment_url;
         } else {
             showPaymentNotice('Error: ' + (result.message || 'Failed to start ToyyibPay payment'), 'error');
@@ -897,6 +900,31 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
         showPaymentNotice('Error: ' + result.message, 'error');
     }
 });
+
+function failPendingToyyibPayIfReturned() {
+    const billCode = sessionStorage.getItem('pendingToyyibPayBill');
+    if (!billCode) return;
+
+    const navigationEntry = performance.getEntriesByType?.('navigation')?.[0];
+    const cameBack = navigationEntry?.type === 'back_forward';
+    if (!cameBack) return;
+
+    const formData = new FormData();
+    formData.append('action', 'fail_toyyibpay_pending');
+    formData.append('bill_code', billCode);
+
+    fetch('../action.php', {
+        method: 'POST',
+        body: formData,
+        keepalive: true
+    }).finally(() => {
+        sessionStorage.removeItem('pendingToyyibPayBill');
+        showPaymentNotice('FPX payment was not completed and has been marked as failed.', 'error');
+        setTimeout(() => window.location.reload(), 1200);
+    });
+}
+
+window.addEventListener('pageshow', failPendingToyyibPayIfReturned);
 
 document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.payment-method-tab').forEach(tab => {

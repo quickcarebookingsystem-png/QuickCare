@@ -216,7 +216,71 @@ if ($action === 'start_toyyibpay') {
         exit;
     }
 
-    echo json_encode(['success' => true, 'payment_url' => $bill['payment_url']]);
+    echo json_encode(['success' => true, 'payment_url' => $bill['payment_url'], 'bill_code' => $bill['bill_code']]);
+    exit;
+}
+
+if ($action === 'fail_toyyibpay_pending') {
+    ensure_failed_payment_status($conn);
+    if (!isset($_SESSION['id'])) {
+        echo json_encode(['success' => false, 'message' => 'Please login first']);
+        exit;
+    }
+
+    $user_id = (int)$_SESSION['id'];
+    $billCode = trim($_POST['bill_code'] ?? '');
+
+    if ($billCode === '') {
+        echo json_encode(['success' => false, 'message' => 'Missing bill code']);
+        exit;
+    }
+
+    $stmt = $conn->prepare("
+        SELECT appointment_code
+        FROM payments
+        WHERE transaction_id = ?
+          AND user_id = ?
+          AND payment_method = 'FPX / ToyyibPay'
+          AND payment_status = 'pending'
+        LIMIT 1
+    ");
+    $stmt->bind_param("si", $billCode, $user_id);
+    $stmt->execute();
+    $paymentRow = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$paymentRow) {
+        echo json_encode(['success' => true]);
+        exit;
+    }
+
+    $stmt = $conn->prepare("
+        UPDATE payments
+        SET payment_status = 'failed'
+        WHERE transaction_id = ?
+          AND user_id = ?
+          AND payment_method = 'FPX / ToyyibPay'
+          AND payment_status = 'pending'
+    ");
+    $stmt->bind_param("si", $billCode, $user_id);
+    $stmt->execute();
+    $stmt->close();
+
+    $appointmentCode = $paymentRow['appointment_code'] ?? '';
+    if ($appointmentCode !== '') {
+        $stmt = $conn->prepare("
+            UPDATE appointments
+            SET payment_status = 'pending'
+            WHERE appointment_code = ?
+              AND user_id = ?
+              AND payment_status NOT IN ('paid', 'approved')
+        ");
+        $stmt->bind_param("si", $appointmentCode, $user_id);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    echo json_encode(['success' => true]);
     exit;
 }
 
@@ -1249,7 +1313,8 @@ if ($action === 'export_report') {
         [$content, $y] = $startPage('Payment Report');
         $content .= $sectionTitle('Payment Details', $y);
         $y -= 24;
-        $content .= $tableHeader($y, [[48, 'Date'], [105, 'Receipt'], [205, 'Patient'], [305, 'Appointment'], [385, 'Amount'], [455, 'Status']]);
+        $paymentDetailHeader = [[48, 'Date'], [95, 'Receipt #'], [165, 'Patient'], [245, 'Appointment'], [325, 'Amount'], [385, 'Transaction ID'], [485, 'Status']];
+        $content .= $tableHeader($y, $paymentDetailHeader);
         $y -= 28;
         foreach ($paymentRows as $payment) {
             if ($y < 50) {
@@ -1257,15 +1322,16 @@ if ($action === 'export_report') {
                 [$content, $y] = $startPage('Payment Report');
                 $content .= $sectionTitle('Payment Details', $y);
                 $y -= 24;
-                $content .= $tableHeader($y, [[48, 'Date'], [105, 'Receipt'], [205, 'Patient'], [305, 'Appointment'], [385, 'Amount'], [455, 'Status']]);
+                $content .= $tableHeader($y, $paymentDetailHeader);
                 $y -= 28;
             }
             $content .= $pdfText(48, $y, substr((string)($payment['payment_date'] ?? ''), 0, 10), 8);
-            $content .= $pdfText(105, $y, substr($payment['receipt_number'] ?? '', 0, 18), 8);
-            $content .= $pdfText(205, $y, substr($payment['patient_name'] ?? '', 0, 18), 8);
-            $content .= $pdfText(305, $y, substr($payment['appointment_code'] ?? '', 0, 14), 8);
-            $content .= $pdfText(385, $y, 'RM ' . number_format((float)($payment['amount'] ?? 0), 2), 8);
-            $content .= $pdfText(455, $y, $payment['payment_status'] ?? '', 8);
+            $content .= $pdfText(95, $y, substr((string)($payment['receipt_number'] ?? '-'), 0, 12), 7);
+            $content .= $pdfText(165, $y, substr((string)($payment['patient_name'] ?? '-'), 0, 14), 7);
+            $content .= $pdfText(245, $y, substr((string)($payment['appointment_code'] ?? '-'), 0, 12), 7);
+            $content .= $pdfText(325, $y, 'RM ' . number_format((float)($payment['amount'] ?? 0), 2), 7);
+            $content .= $pdfText(385, $y, substr((string)($payment['transaction_id'] ?? '-'), 0, 16), 7);
+            $content .= $pdfText(485, $y, substr((string)($payment['payment_status'] ?? ''), 0, 12), 7);
             $content .= $pdfLine(42, $y - 7, 553, $y - 7, 0.94, 0.91, 0.89);
             $y -= 16;
         }
@@ -1299,7 +1365,8 @@ if ($action === 'export_report') {
         [$content, $y] = $startPage('Appointment Report');
         $content .= $sectionTitle('Appointment Details', $y);
         $y -= 24;
-        $content .= $tableHeader($y, [[44, 'Code'], [105, 'Patient'], [210, 'Doctor'], [325, 'Date'], [390, 'Time'], [440, 'Status'], [500, 'Payment']]);
+        $appointmentDetailHeader = [[44, 'ID'], [115, 'Patient'], [185, 'Doctor'], [255, 'Service'], [335, 'Date'], [410, 'Status'], [485, 'Amount']];
+        $content .= $tableHeader($y, $appointmentDetailHeader);
         $y -= 28;
         foreach ($appointments as $appointment) {
             if ($y < 50) {
@@ -1307,16 +1374,16 @@ if ($action === 'export_report') {
                 [$content, $y] = $startPage('Appointment Report');
                 $content .= $sectionTitle('Appointment Details', $y);
                 $y -= 24;
-                $content .= $tableHeader($y, [[44, 'Code'], [105, 'Patient'], [210, 'Doctor'], [325, 'Date'], [390, 'Time'], [440, 'Status'], [500, 'Payment']]);
+                $content .= $tableHeader($y, $appointmentDetailHeader);
                 $y -= 28;
             }
-            $content .= $pdfText(44, $y, $appointment['appointment_code'] ?? '', 8);
-            $content .= $pdfText(105, $y, substr($appointment['name'] ?? '', 0, 18), 8);
-            $content .= $pdfText(210, $y, substr($appointment['doctor_name'] ?? '', 0, 18), 8);
-            $content .= $pdfText(325, $y, $appointment['appointment_date'] ?? '', 8);
-            $content .= $pdfText(390, $y, format_time_display($appointment['appointment_time'] ?? ''), 8);
-            $content .= $pdfText(440, $y, $appointment['appointment_status'] ?? '', 8);
-            $content .= $pdfText(500, $y, $appointment['payment_status'] ?? '', 8);
+            $content .= $pdfText(44, $y, substr((string)($appointment['appointment_code'] ?? ''), 0, 12), 7);
+            $content .= $pdfText(115, $y, substr((string)($appointment['name'] ?? ''), 0, 13), 7);
+            $content .= $pdfText(185, $y, substr((string)($appointment['doctor_name'] ?? ''), 0, 13), 7);
+            $content .= $pdfText(255, $y, substr((string)($appointment['service_name'] ?? ''), 0, 14), 7);
+            $content .= $pdfText(335, $y, format_date_display($appointment['appointment_date'] ?? ''), 7);
+            $content .= $pdfText(410, $y, substr((string)($appointment['appointment_status'] ?? ''), 0, 12), 7);
+            $content .= $pdfText(485, $y, 'RM ' . number_format((float)($appointment['amount'] ?? 0), 2), 7);
             $content .= $pdfLine(42, $y - 7, 553, $y - 7, 0.94, 0.91, 0.89);
             $y -= 16;
         }
