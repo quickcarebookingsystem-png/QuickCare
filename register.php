@@ -19,7 +19,12 @@ app_header('QuickCare - Register');
       <div class="form-group"><label>Email Address</label><input class="form-control" type="email" name="email" required></div>
       <div class="form-group">
         <label>Password</label>
-        <input class="form-control" type="password" name="password" id="registerPassword" required>
+        <div class="password-field">
+          <input class="form-control" type="password" name="password" id="registerPassword" required>
+          <button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">
+            <span class="password-toggle-eye" aria-hidden="true"></span>
+          </button>
+        </div>
         <div id="passwordRequirements" style="margin-top: 10px; background: var(--surface2); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
           <div id="req-length" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 4px;">
             <span class="icon">○</span> Minimum 8 characters
@@ -79,6 +84,22 @@ document.getElementById('registerForm').addEventListener('submit', function(e) {
         // Smooth scroll to the top so the user sees the notification
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+});
+
+document.querySelectorAll('.password-toggle').forEach(function (button) {
+  var input = button.closest('.password-field').querySelector('input');
+
+  button.addEventListener('mousedown', function (event) {
+    event.preventDefault();
+  });
+
+  button.addEventListener('click', function () {
+    var showPassword = input.type === 'password';
+    input.type = showPassword ? 'text' : 'password';
+    button.setAttribute('aria-pressed', showPassword ? 'true' : 'false');
+    button.setAttribute('aria-label', showPassword ? 'Hide password' : 'Show password');
+    input.focus();
+  });
 });
 </script>
 </body>

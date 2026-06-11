@@ -170,6 +170,71 @@ h3 { font-size: 1.2rem; }
   box-shadow: 0 0 0 3px rgba(124,51,73,0.1);
 }
 
+.password-field {
+  position: relative;
+}
+
+.password-field .form-control {
+  padding-right: 46px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 34px;
+  height: 34px;
+  transform: translateY(-50%);
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+
+.password-toggle:hover,
+.password-toggle:focus-visible {
+  background: var(--surface2);
+  color: var(--primary);
+  outline: none;
+}
+
+.password-toggle-eye {
+  position: relative;
+  width: 20px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.password-toggle-eye::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+}
+
+.password-toggle[aria-pressed="true"] .password-toggle-eye::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: 8px;
+  width: 2px;
+  height: 22px;
+  border-radius: 999px;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+
 textarea.form-control {
   resize: none;
 }

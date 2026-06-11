@@ -21,7 +21,12 @@ app_header('QuickCare - Login');
       </div>
       <div class="form-group">
         <label>Password</label>
-        <input class="form-control" type="password" name="password" required>
+        <div class="password-field">
+          <input class="form-control" type="password" name="password" required>
+          <button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">
+            <span class="password-toggle-eye" aria-hidden="true"></span>
+          </button>
+        </div>
       </div>
       <div class="forgot-link">
         <a href="forgot_password.php" draggable = "false">Forgot Password?</a>
@@ -31,5 +36,22 @@ app_header('QuickCare - Login');
     </form>
   </div>
 </div>
+<script>
+document.querySelectorAll('.password-toggle').forEach(function (button) {
+  var input = button.closest('.password-field').querySelector('input');
+
+  button.addEventListener('mousedown', function (event) {
+    event.preventDefault();
+  });
+
+  button.addEventListener('click', function () {
+    var showPassword = input.type === 'password';
+    input.type = showPassword ? 'text' : 'password';
+    button.setAttribute('aria-pressed', showPassword ? 'true' : 'false');
+    button.setAttribute('aria-label', showPassword ? 'Hide password' : 'Show password');
+    input.focus();
+  });
+});
+</script>
 </body>
 </html>

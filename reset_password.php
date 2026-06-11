@@ -15,7 +15,12 @@ app_header('QuickCare - Reset Password');
       <input type="hidden" name="token" value="<?php echo e($_GET['token'] ?? ''); ?>">
       <div class="form-group">
         <label>New Password</label>
-        <input class="form-control" type="password" name="new_password" required>
+        <div class="password-field">
+          <input class="form-control" type="password" name="new_password" required>
+          <button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">
+            <span class="password-toggle-eye" aria-hidden="true"></span>
+          </button>
+        </div>
       </div>
       <div class="form-group">
         <label>Confirm Password</label>
@@ -25,5 +30,22 @@ app_header('QuickCare - Reset Password');
     </form>
   </div>
 </div>
+<script>
+document.querySelectorAll('.password-toggle').forEach(function (button) {
+  var input = button.closest('.password-field').querySelector('input');
+
+  button.addEventListener('mousedown', function (event) {
+    event.preventDefault();
+  });
+
+  button.addEventListener('click', function () {
+    var showPassword = input.type === 'password';
+    input.type = showPassword ? 'text' : 'password';
+    button.setAttribute('aria-pressed', showPassword ? 'true' : 'false');
+    button.setAttribute('aria-label', showPassword ? 'Hide password' : 'Show password');
+    input.focus();
+  });
+});
+</script>
 </body>
 </html>
