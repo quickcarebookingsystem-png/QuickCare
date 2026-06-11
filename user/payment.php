@@ -12,7 +12,7 @@ $selected_appointment = $_GET['appointment'] ?? '';
 <div class="checkout-container">
     <div class="qr-payment-section">
         <div class="section-title">
-            <span class="section-icon">📱</span> QR Code Payment
+            <span class="section-icon">💳</span> Payment
         </div>
 
         <!-- Step 1: Select Appointment -->
@@ -43,26 +43,38 @@ $selected_appointment = $_GET['appointment'] ?? '';
             </div>
         </div>
 
-        <!-- Step 2: Payment Details -->
-        <div class="step-box payment-qr-active" id="qrStep" style="display: none;">
+        <!-- Step 2: Payment Method -->
+        <div class="step-box" id="methodStep" style="display: none;">
             <div class="step-number">2</div>
+            <div class="step-content">
+                <h3>Choose Payment Method</h3>
+                <div class="payment-method-tabs" role="tablist" aria-label="Payment method">
+                    <button type="button" class="payment-method-tab active" data-payment-method="fpx" role="tab" aria-selected="true">FPX</button>
+                    <button type="button" class="payment-method-tab" data-payment-method="qr" role="tab" aria-selected="false">QR Pay</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: QR Payment Details -->
+        <div class="step-box payment-fpx-active" id="qrStep" style="display: none;">
+            <div class="step-number">3</div>
             <div class="step-content">
                 <h3>Payment Details</h3>
                 <div class="qr-container">
-                    <div class="qr-stack">
-                        <div class="qr-code">
-                            <div class="qr-type-tabs" role="tablist" aria-label="QR type">
-                                <button type="button" class="qr-type-tab active" data-qr-type="tng" role="tab" aria-selected="true">TNG</button>
-                                <button type="button" class="qr-type-tab" data-qr-type="bank" role="tab" aria-selected="false">Bank</button>
+                        <div class="qr-stack">
+                            <div class="qr-code">
+                                <div class="qr-type-tabs" role="tablist" aria-label="QR type">
+                                    <button type="button" class="qr-type-tab active" data-qr-type="tng" role="tab" aria-selected="true">TNG</button>
+                                    <button type="button" class="qr-type-tab" data-qr-type="bank" role="tab" aria-selected="false">Bank</button>
+                                </div>
+                                <img src="<?php echo e(app_url('uploads/receipts/tng_qr.JPG')); ?>"
+                                     alt="Touch n Go payment QR Code"
+                                     id="paymentQrImage"
+                                     data-bank-src="<?php echo e(app_url('uploads/receipts/bank_qr.JPG')); ?>"
+                                     data-tng-src="<?php echo e(app_url('uploads/receipts/tng_qr.JPG')); ?>">
+                                <div class="qr-caption" id="paymentQrCaption">Touch 'n Go eWallet</div>
                             </div>
-                            <img src="<?php echo e(app_url('uploads/receipts/tng_qr.JPG')); ?>"
-                                 alt="Touch n Go payment QR Code"
-                                 id="paymentQrImage"
-                                 data-bank-src="<?php echo e(app_url('uploads/receipts/bank_qr.JPG')); ?>"
-                                 data-tng-src="<?php echo e(app_url('uploads/receipts/tng_qr.JPG')); ?>">
-                            <div class="qr-caption" id="paymentQrCaption">Touch 'n Go eWallet</div>
                         </div>
-                    </div>
                         <div class="payment-details">
                             <div class="amount-display">
                                 Amount: <strong id="payAmount">RM 0.00</strong>
@@ -86,7 +98,7 @@ $selected_appointment = $_GET['appointment'] ?? '';
                                 <span class="bank-detail-value">NG SHUZHENG<br><small>Admin QuickCare Clinic</small></span>
                             </div>
                         </div>
-                        <div class="warning-note">
+                        <div class="warning-note" id="paymentInstructionNote">
                             ⚠️ After payment, please upload the receipt below for verification
                         </div>
                     </div>
@@ -94,30 +106,51 @@ $selected_appointment = $_GET['appointment'] ?? '';
             </div>
         </div>
 
-        <!-- Step 3: Upload Receipt -->
+        <!-- Step 4: Confirm Payment -->
         <div class="step-box" id="uploadStep" style="display: none;">
-            <div class="step-number">3</div>
+            <div class="step-number">4</div>
             <div class="step-content">
-                <h3>Upload Payment Receipt</h3>
+                <h3 id="paymentSubmitTitle">Continue to Payment</h3>
                 <form id="paymentForm" enctype="multipart/form-data">
                     <input type="hidden" id="appointmentCode" name="appointment_code">
                     <input type="hidden" id="amount" name="amount">
                     <input type="hidden" id="paymentMethodLabel" name="payment_method_label">
+
+                    <div class="payment-summary-card">
+                        <div class="payment-summary-top">
+                            <div>
+                                <div class="payment-summary-label">Appointment</div>
+                                <div class="payment-summary-value" id="summaryAppointment">-</div>
+                            </div>
+                            <span class="payment-summary-method" id="summaryMethod">FPX</span>
+                        </div>
+                        <div class="payment-summary-row">
+                            <span>Service</span>
+                            <strong id="summaryService">-</strong>
+                        </div>
+                        <div class="payment-summary-total">
+                            <span>Total Amount</span>
+                            <strong id="summaryAmount">RM 0.00</strong>
+                        </div>
+                        <div class="payment-summary-note" id="summaryPaymentNote">
+                            You will be redirected to ToyyibPay to complete your FPX payment.
+                        </div>
+                    </div>
                     
-                    <div class="form-group">
+                    <div class="form-group" id="receiptUploadGroup">
                         <label>Upload Receipt/Screenshot</label>
                         <input type="file" class="form-control" id="receipt" name="receipt" 
-                               accept="image/*,.pdf" required>
+                               accept="image/*,.pdf">
                         <small class="text-muted">Format: JPG, PNG, PDF (Max 2MB)</small>
                     </div>
                     
-                    <div class="form-group">
+                    <div class="form-group" id="remarksGroup">
                         <label>Remarks (Optional)</label>
                         <textarea class="form-control" id="remarks" name="remarks" 
                                   rows="4" placeholder="Any notes for admin..."></textarea>
                     </div>
                     
-                    <button type="submit" class="btn btn-primary">Submit Payment Verification</button>
+                    <button type="submit" class="btn btn-primary" id="paymentSubmitButton">Pay with ToyyibPay</button>
                 </form>
             </div>
         </div>
@@ -196,6 +229,66 @@ $selected_appointment = $_GET['appointment'] ?? '';
     color: var(--text);
     font-size: 18px;
     margin-top: 0;
+}
+
+.payment-method-tabs {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(100%, 340px);
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.payment-method-tabs::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    bottom: 6px;
+    left: 6px;
+    width: calc((100% - 12px) / 2);
+    background: var(--primary);
+    border-radius: 7px;
+    transition: transform 0.28s ease;
+}
+
+.payment-method-tabs.qr-active::before {
+    transform: translateX(100%);
+}
+
+.payment-method-tab {
+    position: relative;
+    z-index: 1;
+    min-height: 40px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.payment-method-tab.active {
+    color: white;
+}
+
+#qrStep.payment-fpx-active .qr-stack {
+    display: none;
+}
+
+#qrStep.payment-fpx-active .qr-container {
+    display: block;
+}
+
+#qrStep.payment-fpx-active .bank-detail-row:nth-child(2),
+#qrStep.payment-fpx-active .bank-detail-row:nth-child(3) {
+    display: none;
 }
 
 .qr-container {
@@ -320,6 +413,94 @@ $selected_appointment = $_GET['appointment'] ?? '';
     border-radius: 8px;
     text-align: center;
     color: var(--primary);
+}
+
+.payment-amount-summary {
+    margin-bottom: 18px;
+}
+
+.payment-summary-card {
+    margin-bottom: 20px;
+    padding: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 8px 22px rgba(124,51,73,0.07);
+}
+
+.payment-summary-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.payment-summary-label,
+.payment-summary-row span,
+.payment-summary-total span {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.payment-summary-value {
+    margin-top: 4px;
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.payment-summary-method {
+    min-width: 92px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(124,51,73,0.1);
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.payment-summary-row,
+.payment-summary-total {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 14px;
+}
+
+.payment-summary-row strong {
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 700;
+    text-align: right;
+}
+
+.payment-summary-total {
+    margin-top: 14px;
+    padding: 16px;
+    background: rgba(124,51,73,0.08);
+    border-radius: 10px;
+}
+
+.payment-summary-total strong {
+    color: var(--primary);
+    font-size: 24px;
+    font-weight: 800;
+}
+
+.payment-summary-note {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(42,95,143,0.09);
+    color: var(--info);
+    font-size: 13px;
+    line-height: 1.45;
 }
 
 .bank-details {
@@ -465,22 +646,107 @@ $selected_appointment = $_GET['appointment'] ?? '';
     .bank-detail-value {
         text-align: left;
     }
+
+    .payment-summary-top,
+    .payment-summary-row,
+    .payment-summary-total {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .payment-summary-row strong {
+        text-align: left;
+    }
 }
 </style>
 
 <script>
 let currentAppointmentCode = '';
+let selectedPaymentMethod = 'fpx';
 let selectedQrType = 'tng';
 
 function updatePaymentMethodLabel() {
     const labelInput = document.getElementById('paymentMethodLabel');
     if (!labelInput) return;
 
-    labelInput.value = selectedQrType === 'bank' ? 'QR Pay - Bank' : 'QR Pay - TNG';
+    if (selectedPaymentMethod === 'qr') {
+        labelInput.value = selectedQrType === 'bank' ? 'QR Pay - Bank' : 'QR Pay - TNG';
+    } else {
+        labelInput.value = 'FPX / Bank Transfer';
+    }
+}
+
+function updatePaymentSummary() {
+    const select = document.getElementById('appointmentSelect');
+    const selectedOption = select?.options[select.selectedIndex];
+    const appointmentId = selectedOption?.value || '';
+    const serviceName = selectedOption?.dataset.name || '-';
+    const amount = selectedOption?.dataset.amount || '0';
+    const amountText = appointmentId ? 'RM ' + parseFloat(amount).toFixed(2) : 'RM 0.00';
+    const methodText = selectedPaymentMethod === 'qr'
+        ? (selectedQrType === 'bank' ? 'QR Pay - Bank' : 'QR Pay - TNG')
+        : 'FPX';
+
+    const summaryAppointment = document.getElementById('summaryAppointment');
+    const summaryService = document.getElementById('summaryService');
+    const summaryAmount = document.getElementById('summaryAmount');
+    const summaryMethod = document.getElementById('summaryMethod');
+    const summaryPaymentNote = document.getElementById('summaryPaymentNote');
+
+    if (summaryAppointment) summaryAppointment.textContent = appointmentId || '-';
+    if (summaryService) summaryService.textContent = appointmentId ? serviceName : '-';
+    if (summaryAmount) summaryAmount.textContent = amountText;
+    if (summaryMethod) summaryMethod.textContent = methodText;
+    if (summaryPaymentNote) {
+        summaryPaymentNote.textContent = selectedPaymentMethod === 'qr'
+            ? 'Scan the selected QR, then upload your receipt for admin verification.'
+            : 'You will be redirected to ToyyibPay to complete your FPX payment.';
+    }
+}
+
+function setPaymentMethod(method) {
+    const isQr = method === 'qr';
+    const detailsStep = document.getElementById('qrStep');
+    const uploadStepNumber = document.querySelector('#uploadStep .step-number');
+    const tabs = document.querySelector('.payment-method-tabs');
+    const receiptUploadGroup = document.getElementById('receiptUploadGroup');
+    const remarksGroup = document.getElementById('remarksGroup');
+    const receiptInput = document.getElementById('receipt');
+    const submitTitle = document.getElementById('paymentSubmitTitle');
+    const submitButton = document.getElementById('paymentSubmitButton');
+    const instructionNote = document.getElementById('paymentInstructionNote');
+
+    selectedPaymentMethod = isQr ? 'qr' : 'fpx';
+    detailsStep?.classList.toggle('payment-qr-active', isQr);
+    detailsStep?.classList.toggle('payment-fpx-active', !isQr);
+    if (detailsStep) detailsStep.style.display = currentAppointmentCode && isQr ? 'flex' : 'none';
+    if (uploadStepNumber) uploadStepNumber.textContent = isQr ? '4' : '3';
+    tabs?.classList.toggle('qr-active', isQr);
+    if (receiptUploadGroup) receiptUploadGroup.style.display = isQr ? '' : 'none';
+    if (remarksGroup) remarksGroup.style.display = isQr ? '' : 'none';
+    if (receiptInput) receiptInput.required = isQr;
+    if (submitTitle) submitTitle.textContent = isQr ? 'Upload Manual Payment Receipt' : 'Pay with FPX';
+    if (submitButton) submitButton.textContent = isQr ? 'Submit Payment Verification' : 'Pay with ToyyibPay';
+    if (instructionNote) {
+        instructionNote.textContent = isQr
+            ? 'After payment, please upload the receipt below for verification.'
+            : 'You will be redirected to ToyyibPay to complete FPX payment.';
+    }
+
+    document.querySelectorAll('.payment-method-tab').forEach(tab => {
+        const active = tab.dataset.paymentMethod === selectedPaymentMethod;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    updatePaymentMethodLabel();
+    updatePaymentSummary();
 }
 
 function resetPaymentMethod() {
+    selectedPaymentMethod = 'fpx';
     selectedQrType = 'tng';
+    setPaymentMethod('fpx');
     setQrType('tng');
     updatePaymentMethodLabel();
 }
@@ -507,6 +773,7 @@ function setQrType(type) {
         tab.setAttribute('aria-selected', active ? 'true' : 'false');
     });
     updatePaymentMethodLabel();
+    updatePaymentSummary();
 }
 
 function updateAmount() {
@@ -523,11 +790,15 @@ function updateAmount() {
         document.getElementById('payAmount').innerHTML = 'RM ' + parseFloat(amount).toFixed(2);
         document.getElementById('appointmentCode').value = appointmentId;
         document.getElementById('amount').value = amount;
-        document.getElementById('qrStep').style.display = 'flex';
+        updatePaymentSummary();
+        document.getElementById('methodStep').style.display = 'flex';
+        document.getElementById('qrStep').style.display = selectedPaymentMethod === 'qr' ? 'flex' : 'none';
         document.getElementById('uploadStep').style.display = 'flex';
     } else {
         resetPaymentMethod();
         currentAppointmentCode = '';
+        updatePaymentSummary();
+        document.getElementById('methodStep').style.display = 'none';
         document.getElementById('qrStep').style.display = 'none';
         document.getElementById('uploadStep').style.display = 'none';
     }
@@ -564,9 +835,43 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
     const receiptInput = document.getElementById('receipt');
     const receiptFile = receiptInput.files[0];
     const maxReceiptSize = 2 * 1024 * 1024;
+    const methodLabel = document.getElementById('paymentMethodLabel').value;
+
+    if (selectedPaymentMethod === 'fpx') {
+        const formData = new FormData();
+        formData.append('action', 'start_toyyibpay');
+        formData.append('appointment_code', document.getElementById('appointmentCode').value);
+        formData.append('amount', document.getElementById('amount').value);
+        formData.append('remarks', '');
+
+        const response = await fetch('../action.php', {
+            method: 'POST',
+            body: formData
+        });
+        const rawResult = await response.text();
+        let result;
+        try {
+            result = JSON.parse(rawResult);
+        } catch (error) {
+            showPaymentNotice('Error: Server returned an invalid response. ' + rawResult.slice(0, 160), 'error');
+            return;
+        }
+
+        if (result.success && result.payment_url) {
+            window.location.href = result.payment_url;
+        } else {
+            showPaymentNotice('Error: ' + (result.message || 'Failed to start ToyyibPay payment'), 'error');
+        }
+        return;
+    }
 
     if (receiptFile && receiptFile.size > maxReceiptSize) {
         showPaymentNotice('Receipt file is too large. Please upload a file 2MB or smaller.', 'error');
+        receiptInput.focus();
+        return;
+    }
+    if (!receiptFile) {
+        showPaymentNotice('Please upload payment receipt.', 'error');
         receiptInput.focus();
         return;
     }
@@ -575,7 +880,6 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
     formData.append('action', 'submit_payment');
     formData.append('appointment_code', document.getElementById('appointmentCode').value);
     formData.append('amount', document.getElementById('amount').value);
-    const methodLabel = document.getElementById('paymentMethodLabel').value;
     formData.append('payment_method', methodLabel);
     formData.append('remarks', document.getElementById('remarks').value.trim());
     formData.append('receipt', receiptFile);
@@ -595,9 +899,13 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
 });
 
 document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.payment-method-tab').forEach(tab => {
+        tab.addEventListener('click', () => setPaymentMethod(tab.dataset.paymentMethod || 'fpx'));
+    });
     document.querySelectorAll('.qr-type-tab').forEach(tab => {
         tab.addEventListener('click', () => setQrType(tab.dataset.qrType || 'bank'));
     });
+    setPaymentMethod('fpx');
     setQrType('tng');
 
     const select = document.getElementById('appointmentSelect');

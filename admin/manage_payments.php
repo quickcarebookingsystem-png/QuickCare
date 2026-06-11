@@ -68,6 +68,7 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                 <option value="pending">Pending</option>
                 <option value="verifying">Verifying</option>
                 <option value="approved">Paid</option>
+                <option value="failed">Failed</option>
                 <option value="rejected">Rejected</option>
                 <option value="refund_requested">Refund Requests</option>
                 <option value="refunded">Refunded</option>
@@ -83,13 +84,14 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                 <thead>
                     <tr>
                         <th>Date</th>
-                        <th>Receipt #</th>
-                        <th>Patient</th>
+                        <th>Reference</th>
+                        <th>Patient Name</th>
                         <th>Appointment</th>
                         <th>Amount</th>
                         <th>Transaction ID</th>
                         <th>Status</th>
                         <th>Receipt</th>
+                        <th>Details</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -118,18 +120,31 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                         $refundNote = payment_note_display($paymentStatus, $payment['remarks'] ?? '');
                         $refundNoteText = $refundNote['text'] ?? '';
                         $paymentMethodText = payment_method_from_payment($payment);
+                        $hasOfficialReceipt = in_array($paymentStatus, ['paid', 'approved', 'refund_requested', 'refund_rejected', 'refunded'], true);
+                        $referenceValue = $hasOfficialReceipt && trim((string)($payment['receipt_number'] ?? '')) !== ''
+                            ? $payment['receipt_number']
+                            : ($payment['payment_code'] ?? '-');
                     ?>
                     <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>" data-id="<?php echo $paymentId; ?>">
                         <td><?php echo date('d M Y, h:i A', strtotime($payment['payment_date'])); ?></td>
-                        <td><?php echo htmlspecialchars($payment['receipt_number']); ?></td>
+                        <td><?php echo htmlspecialchars($referenceValue); ?></td>
                         <td><?php echo htmlspecialchars($payment['patient_name']); ?></td>
                         <td><?php echo htmlspecialchars($payment['appointment_code']); ?></td>
                         <td>RM <?php echo number_format($payment['amount'], 2); ?></td>
-                        <td><?php echo htmlspecialchars($payment['transaction_id']); ?></td>
+                        <td><?php echo htmlspecialchars($payment['transaction_id'] ?? '-'); ?></td>
                         <td><?php echo badge($badgeStatus); ?></td>
                         <td>
                             <?php if (!empty($receiptToView)): ?>
                                 <button class="btn-view" onclick='viewReceipt(<?php echo json_encode($receiptToView); ?>, <?php echo json_encode($refundNoteText); ?>, <?php echo json_encode($paymentMethodText); ?>)'>
+                                    View
+                                </button>
+                            <?php else: ?>
+                                <span class="text-muted">-</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if ($paymentId > 0): ?>
+                                <button class="btn-view-details" onclick="viewPaymentDetails(<?php echo $paymentId; ?>)">
                                     View
                                 </button>
                             <?php else: ?>
@@ -159,6 +174,19 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                     <?php endforeach; ?>
                 </tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- Payment Details Modal -->
+<div id="paymentDetailsModal" class="modal-overlay" style="display: none;">
+    <div class="modal payment-details-view-modal">
+        <div class="modal-header">
+            <span class="modal-title">Payment Details</span>
+            <button class="modal-close" onclick="closePaymentDetailsModal()">✕</button>
+        </div>
+        <div class="modal-body" id="paymentDetailsContent">
+            <p class="text-muted">Loading...</p>
         </div>
     </div>
 </div>
@@ -348,28 +376,76 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
 .payments-table-container {
     background: var(--surface);
     border-radius: var(--radius);
-    overflow-x: auto;
+    overflow: hidden;
     box-shadow: var(--shadow);
     border: 1px solid var(--border);
+}
+
+.admin-payment-container .table-wrap {
+    overflow-x: visible;
 }
 
 .payments-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;
+    table-layout: auto;
 }
 
 .payments-table th,
 .payments-table td {
-    padding: 12px 15px;
+    padding: 12px 10px;
     text-align: left;
     border-bottom: 1px solid var(--border);
+    box-sizing: border-box;
+    overflow-wrap: break-word;
+    word-break: normal;
 }
 
 .payments-table th {
     background: var(--surface2);
     font-weight: 600;
     color: var(--text);
+    line-height: 1.25;
+    white-space: nowrap;
+}
+
+.payments-table td {
+    vertical-align: middle;
+}
+
+.payments-table th:nth-child(1),
+.payments-table td:nth-child(1) {
+    width: 13%;
+}
+
+.payments-table th:nth-child(3),
+.payments-table td:nth-child(3),
+.payments-table th:nth-child(6),
+.payments-table td:nth-child(6) {
+    width: 13%;
+}
+
+.payments-table th:nth-child(5),
+.payments-table td:nth-child(5),
+.payments-table th:nth-child(8),
+.payments-table td:nth-child(8),
+.payments-table th:nth-child(9),
+.payments-table td:nth-child(9) {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.payments-table th:nth-child(10),
+.payments-table td:nth-child(10) {
+    width: 90px;
+    white-space: nowrap;
+}
+
+.payments-table td:nth-child(2),
+.payments-table td:nth-child(4),
+.payments-table td:nth-child(6) {
+    overflow-wrap: anywhere;
 }
 
 .payments-table tr:hover {
@@ -377,18 +453,32 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
 }
 
 /* Buttons */
-.btn-view {
+.btn-view,
+.btn-view-details {
     padding: 5px 12px;
     border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: 12px;
     border: none;
+    transition: background 0.15s, color 0.15s;
+}
+
+.btn-view {
     background: var(--primary);
     color: white;
 }
 
 .btn-view:hover {
     background: var(--primary-dark);
+}
+
+.btn-view-details {
+    background: var(--teal);
+    color: white;
+}
+
+.btn-view-details:hover {
+    background: rgba(42,127,127,0.85);
 }
 
 .btn-approve {
@@ -399,7 +489,6 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
     border: none;
     background: var(--success);
     color: white;
-    margin-right: 5px;
 }
 
 .btn-approve:hover {
@@ -479,7 +568,21 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
 }
 
 .actions-cell {
-    white-space: nowrap;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    white-space: normal;
+}
+
+.actions-cell .btn-approve,
+.actions-cell .btn-reject {
+    width: 100%;
+    min-width: 74px;
+    min-height: 28px;
+    padding-left: 6px;
+    padding-right: 6px;
+    text-align: center;
 }
 
 /* Modal */
@@ -501,6 +604,42 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
     border-radius: var(--radius);
     width: 90%;
     max-width: 500px;
+}
+
+.payment-details-view-modal {
+    max-width: 500px;
+}
+
+.payment-details-modal .detail-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+
+.payment-details-modal .detail-row:last-child {
+    border-bottom: none;
+}
+
+.payment-details-modal .detail-row strong {
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.payment-details-modal .detail-row {
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.payment-details-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
 }
 
 .modal-header {
@@ -655,13 +794,11 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
     
     .payments-table th,
     .payments-table td {
-        padding: 8px 10px;
-        font-size: 12px;
+        padding: 7px 5px;
+        font-size: 11px;
     }
     
     .actions-cell {
-        display: flex;
-        flex-wrap: wrap;
         gap: 5px;
     }
 }
@@ -731,6 +868,32 @@ function initPaymentFilter() {
 }
 
 initPaymentFilter();
+
+async function viewPaymentDetails(paymentId) {
+    const content = document.getElementById('paymentDetailsContent');
+    const modal = document.getElementById('paymentDetailsModal');
+
+    if (!content || !modal) return;
+
+    content.innerHTML = '<p class="text-muted">Loading...</p>';
+    modal.style.display = 'flex';
+
+    try {
+        const response = await fetch('../action.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=get_payment_details&payment_id=${paymentId}`
+        });
+        const data = await response.json();
+        content.innerHTML = data.success ? data.html : '<p class="text-muted">Error loading details.</p>';
+    } catch (error) {
+        content.innerHTML = '<p class="text-muted">Error loading details.</p>';
+    }
+}
+
+function closePaymentDetailsModal() {
+    document.getElementById('paymentDetailsModal').style.display = 'none';
+}
 
 function viewReceipt(receiptImage, reason = '', paymentMethod = '') {
     if (!receiptImage) {

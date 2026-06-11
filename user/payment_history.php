@@ -23,11 +23,23 @@ $payments = get_user_payment_history($user_id);
     <?php else: ?>
         <div class="payments-list">
             <?php foreach ($payments as $payment): ?>
-            <?php $refundReceiptFile = payment_refund_receipt_file($payment['remarks'] ?? ''); ?>
+            <?php
+                $refundReceiptFile = payment_refund_receipt_file($payment['remarks'] ?? '');
+                $hasOfficialReceipt = in_array($payment['payment_status'], ['approved', 'paid', 'refund_requested', 'refund_rejected', 'refunded'], true);
+                $referenceLabel = $hasOfficialReceipt ? 'Receipt #' : 'Payment #';
+                $referenceValue = $hasOfficialReceipt && trim((string)($payment['receipt_number'] ?? '')) !== ''
+                    ? $payment['receipt_number']
+                    : ($payment['payment_code'] ?? $payment['transaction_id'] ?? '-');
+                $showReference = $payment['payment_status'] !== 'failed';
+            ?>
             <div class="payment-card">
                 <div class="payment-header">
                     <div class="payment-info">
-                        <span class="payment-receipt">Receipt #: <?php echo htmlspecialchars($payment['receipt_number']); ?></span>
+                        <?php if ($showReference): ?>
+                        <span class="payment-receipt"><?php echo htmlspecialchars($referenceLabel); ?>: <?php echo htmlspecialchars($referenceValue); ?></span>
+                        <?php else: ?>
+                        <span class="payment-receipt">Payment Failed</span>
+                        <?php endif; ?>
                         <span class="payment-date"><?php echo date('d M Y, h:i A', strtotime($payment['payment_date'])); ?></span>
                     </div>
                     <?php
@@ -48,6 +60,9 @@ $payments = get_user_payment_history($user_id);
                     } elseif ($payment['payment_status'] === 'refund_rejected') {
                         $badgeStatus = 'refund-rejected';
                         $badgeText = 'Refund Rejected';
+                    } elseif ($payment['payment_status'] === 'failed') {
+                        $badgeStatus = 'failed';
+                        $badgeText = 'Failed';
                     }
                     ?>
                     <span class="badge badge-<?php echo htmlspecialchars($badgeStatus); ?>">
@@ -132,7 +147,7 @@ $payments = get_user_payment_history($user_id);
                     </button>
                     <?php endif; ?>
                     
-                    <?php if ($payment['payment_status'] == 'rejected'): ?>
+                    <?php if (in_array($payment['payment_status'], ['rejected', 'failed'], true)): ?>
                     <a href="<?php echo e(page_url('payment', 'user') . '?appointment=' . urlencode($payment['appointment_code'] ?? '')); ?>" class="btn-print">
                         Retry Payment
                     </a>

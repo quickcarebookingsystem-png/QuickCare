@@ -809,7 +809,19 @@ function get_appointments($conn, $role = null, $appointmentDate = null, $limit =
         $types .= 'i';
         $params[] = (int) $limit;
     }
-    return fetch_all_assoc($conn, $sql, $types, $params);
+    $appointments = fetch_all_assoc($conn, $sql, $types, $params);
+    foreach ($appointments as &$appointment) {
+        if (($appointment['payment_status'] ?? '') === 'failed') {
+            $appointment['payment_status'] = 'pending';
+        }
+        $latestPaymentStatus = trim((string)($appointment['latest_payment_status'] ?? ''));
+        if ($latestPaymentStatus !== '' && $latestPaymentStatus !== 'failed') {
+            $appointment['payment_status'] = $latestPaymentStatus;
+        }
+    }
+    unset($appointment);
+
+    return $appointments;
 }
 
 function format_date_display($date) {
@@ -872,6 +884,7 @@ function render_notification($placement = 'toast') {
 
 function app_start($role, $page, $title = null) {
     global $PAGE_TITLES, $conn;
+    ensure_failed_payment_status($conn);
     $_SESSION['QuickCare_role'] = $role;
     $title = $title ?: ($PAGE_TITLES[$page] ?? 'Dashboard');
     echo '<body><div id="app" class="view active">';
@@ -1503,6 +1516,36 @@ function ensure_payment_method_column($conn) {
     return (bool) $conn->query("ALTER TABLE payments ADD COLUMN payment_method VARCHAR(80) NULL AFTER payment_status");
 }
 
+function ensure_failed_payment_status($conn) {
+    foreach (['appointments', 'payments'] as $table) {
+        $columnCheck = $conn->query("SHOW COLUMNS FROM {$table} LIKE 'payment_status'");
+        if (!$columnCheck || $columnCheck->num_rows === 0) {
+            continue;
+        }
+
+        $column = $columnCheck->fetch_assoc();
+        $type = (string)($column['Type'] ?? '');
+        if (stripos($type, 'enum(') !== 0 || str_contains($type, "'failed'")) {
+            continue;
+        }
+
+        preg_match_all("/'((?:[^'\\\\]|\\\\.)*)'/", $type, $matches);
+        $values = array_map(function ($value) {
+            return str_replace("\\'", "'", $value);
+        }, $matches[1] ?? []);
+        $values[] = 'failed';
+        $enumValues = implode(',', array_map(function ($value) use ($conn) {
+            return "'" . $conn->real_escape_string($value) . "'";
+        }, array_unique($values)));
+        $nullSql = strtoupper((string)($column['Null'] ?? '')) === 'NO' ? 'NOT NULL' : 'NULL';
+        $default = $column['Default'] ?? null;
+        $defaultSql = $default !== null ? " DEFAULT '" . $conn->real_escape_string((string)$default) . "'" : '';
+        $conn->query("ALTER TABLE {$table} MODIFY payment_status ENUM({$enumValues}) {$nullSql}{$defaultSql}");
+    }
+
+    return true;
+}
+
 function clean_payment_remarks($remarks) {
     $lines = preg_split('/\R+/', (string)$remarks);
     $lines = array_values(array_filter(array_map('trim', $lines), function ($line) {
@@ -1510,6 +1553,143 @@ function clean_payment_remarks($remarks) {
     }));
 
     return implode("\n", $lines);
+}
+
+function toyyibpay_config() {
+    $configPath = __DIR__ . '/toyyibpay_config.php';
+    $config = is_file($configPath) ? require $configPath : [];
+
+    return [
+        'secret_key' => trim((string)(getenv('TOYYIBPAY_SECRET_KEY') ?: ($config['secret_key'] ?? ''))),
+        'category_code' => trim((string)(getenv('TOYYIBPAY_CATEGORY_CODE') ?: ($config['category_code'] ?? ''))),
+        'base_url' => rtrim((string)($config['base_url'] ?? 'https://toyyibpay.com'), '/'),
+    ];
+}
+
+function create_toyyibpay_bill($appointment, $user) {
+    $config = toyyibpay_config();
+    if ($config['secret_key'] === '' || $config['category_code'] === '') {
+        return ['success' => false, 'message' => 'ToyyibPay secret key or category code is not configured.'];
+    }
+
+    $amount = (float)($appointment['amount'] ?? 0);
+    if ($amount <= 0) {
+        return ['success' => false, 'message' => 'Invalid payment amount.'];
+    }
+
+    $billName = 'QuickCare ' . ($appointment['appointment_code'] ?? 'Appointment');
+    $billDescription = trim(($appointment['service_name'] ?? 'Clinic appointment') . ' - ' . ($appointment['doctor_name'] ?? ''));
+    $payload = [
+        'userSecretKey' => $config['secret_key'],
+        'categoryCode' => $config['category_code'],
+        'billName' => $billName,
+        'billDescription' => $billDescription !== '' ? $billDescription : 'QuickCare appointment payment',
+        'billPriceSetting' => 1,
+        'billPayorInfo' => 1,
+        'billAmount' => (int)round($amount * 100),
+        'billReturnUrl' => absolute_app_url('action.php?action=toyyibpay_return'),
+        'billCallbackUrl' => absolute_app_url('action.php?action=toyyibpay_callback'),
+        'billExternalReferenceNo' => (string)($appointment['appointment_code'] ?? ''),
+        'billTo' => (string)($user['name'] ?? $appointment['name'] ?? 'QuickCare Patient'),
+        'billEmail' => (string)($user['email'] ?? ''),
+        'billPhone' => (string)($user['phone_number'] ?? ''),
+        'billPaymentChannel' => 0,
+        'billContentEmail' => 'Thank you for your QuickCare payment.',
+        'billChargeToCustomer' => 1,
+    ];
+
+    $endpoint = $config['base_url'] . '/index.php/api/createBill';
+    if (!function_exists('curl_init')) {
+        return ['success' => false, 'message' => 'PHP cURL is required for ToyyibPay integration.'];
+    }
+
+    $ch = curl_init($endpoint);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query($payload),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 30,
+    ]);
+    $rawResponse = curl_exec($ch);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if ($rawResponse === false || $curlError !== '') {
+        return ['success' => false, 'message' => 'ToyyibPay request failed: ' . $curlError];
+    }
+
+    $response = json_decode($rawResponse, true);
+    $billCode = $response[0]['BillCode'] ?? $response['BillCode'] ?? '';
+    if ($billCode === '') {
+        return ['success' => false, 'message' => 'ToyyibPay did not return a bill code.'];
+    }
+
+    return [
+        'success' => true,
+        'bill_code' => $billCode,
+        'payment_url' => $config['base_url'] . '/' . rawurlencode($billCode),
+    ];
+}
+
+function mark_toyyibpay_payment_paid($billCode) {
+    global $conn;
+    ensure_payment_method_column($conn);
+
+    $billCode = trim((string)$billCode);
+    if ($billCode === '') {
+        return false;
+    }
+
+    $stmt = $conn->prepare("SELECT * FROM payments WHERE transaction_id = ? LIMIT 1");
+    $stmt->bind_param("s", $billCode);
+    $stmt->execute();
+    $payment = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$payment) {
+        return false;
+    }
+
+    $wasAlreadyPaid = in_array(strtolower((string)($payment['payment_status'] ?? '')), ['paid', 'approved'], true);
+
+    $conn->begin_transaction();
+    try {
+        $receiptNumber = payment_receipt_number($payment);
+        $payment['receipt_number'] = $receiptNumber;
+
+        $stmt = $conn->prepare("UPDATE payments SET payment_status = 'paid', receipt_number = ?, approved_date = COALESCE(approved_date, NOW()) WHERE payment_id = ?");
+        $paymentId = (int)$payment['payment_id'];
+        $stmt->bind_param("si", $receiptNumber, $paymentId);
+        $stmt->execute();
+        $stmt->close();
+
+        if (!empty($payment['appointment_code'])) {
+            $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'paid' WHERE appointment_code = ?");
+            $stmt->bind_param("s", $payment['appointment_code']);
+            $stmt->execute();
+            $stmt->close();
+        }
+
+        if (!$wasAlreadyPaid) {
+            $stmt = $conn->prepare("
+                INSERT INTO receipts (receipt_number, payment_id, user_id, amount, issued_date)
+                VALUES (?, ?, ?, ?, NOW())
+            ");
+            $stmt->bind_param("siid", $receiptNumber, $paymentId, $payment['user_id'], $payment['amount']);
+            $stmt->execute();
+            $stmt->close();
+        }
+
+        $conn->commit();
+        if (!$wasAlreadyPaid) {
+            $payment['payment_status'] = 'paid';
+            send_payment_approved_email((int)$payment['user_id'], $payment);
+        }
+        return true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        return false;
+    }
 }
 
 function payment_refund_receipt_file($remarks) {
@@ -4013,7 +4193,7 @@ function get_user_pending_payments($user_id) {
               FROM appointments a
               WHERE a.name = ?
               AND a.appointment_status IN ('confirm', 'confirmed')
-              AND a.payment_status IN ('pending', 'rejected')
+              AND a.payment_status IN ('pending', 'rejected', 'failed')
               AND NOT EXISTS (
                   SELECT 1 FROM payments p 
                   WHERE p.appointment_code = a.appointment_code 
@@ -4038,6 +4218,7 @@ function get_user_pending_payments($user_id) {
 function get_user_payment_history($user_id) {
     global $conn;
     ensure_payment_method_column($conn);
+    ensure_failed_payment_status($conn);
     
     $stmt = $conn->prepare("SELECT name FROM users WHERE user_id = ?");
     $stmt->bind_param("i", $user_id);
@@ -4077,6 +4258,7 @@ function get_user_payment_history($user_id) {
 function get_all_payments() {
     global $conn;
     ensure_payment_method_column($conn);
+    ensure_failed_payment_status($conn);
     
     $query = "SELECT p.*, 
               u.name as patient_name, 
@@ -4123,6 +4305,7 @@ function get_all_payments() {
                SELECT 1
                FROM payments p
                WHERE p.appointment_code = a.appointment_code
+                 AND p.payment_status <> 'failed'
            )"
     );
 
@@ -4136,30 +4319,9 @@ function get_all_payments() {
 
 // Get pending payments for approval (admin)
 function get_pending_payments() {
-    global $conn;
-    ensure_payment_method_column($conn);
-    
-    $query = "SELECT p.*, 
-              u.name as patient_name, 
-              u.email as patient_email,
-              a.appointment_code, 
-              a.appointment_date, 
-              a.appointment_time,
-              a.doctor_name, 
-              a.service_name
-              FROM payments p
-              LEFT JOIN users u ON p.user_id = u.user_id
-              LEFT JOIN appointments a ON p.appointment_code = a.appointment_code
-              WHERE p.payment_status IN ('verifying', 'pending')
-              ORDER BY p.payment_date ASC";
-    
-    $result = $conn->query($query);
-    $payments = [];
-    while ($row = $result->fetch_assoc()) {
-        $payments[] = $row;
-    }
-    
-    return $payments;
+    return array_values(array_filter(get_all_payments(), function ($payment) {
+        return in_array($payment['payment_status'] ?? '', ['verifying', 'pending'], true);
+    }));
 }
 
 // Generate receipt number
@@ -4172,10 +4334,33 @@ function generate_payment_code() {
     return 'PAY-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
 }
 
+function payment_receipt_number($payment) {
+    global $conn;
+
+    $paymentId = (int)($payment['payment_id'] ?? 0);
+    $receiptNumber = trim((string)($payment['receipt_number'] ?? ''));
+    if ($receiptNumber !== '' && $receiptNumber !== '-') {
+        return $receiptNumber;
+    }
+
+    if ($paymentId <= 0) {
+        return generate_receipt_number();
+    }
+
+    $receiptNumber = generate_receipt_number();
+    $stmt = $conn->prepare("UPDATE payments SET receipt_number = ? WHERE payment_id = ?");
+    $stmt->bind_param("si", $receiptNumber, $paymentId);
+    $stmt->execute();
+    $stmt->close();
+
+    return $receiptNumber;
+}
+
 // Submit payment (user upload receipt)
 function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $remarks, $receipt_file, $payment_status = 'verifying', $payment_method = '') {
     global $conn;
     ensure_payment_method_column($conn);
+    ensure_failed_payment_status($conn);
     
     // Get appointment details
     $stmt = $conn->prepare("
@@ -4193,7 +4378,7 @@ function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $
     }
     
     $payment_code = generate_payment_code();
-    $receipt_number = generate_receipt_number();
+    $receipt_number = in_array($payment_status, ['paid', 'approved'], true) ? generate_receipt_number() : null;
     
     $remarks = clean_payment_remarks($remarks);
     $payment_method = trim((string)$payment_method);
@@ -4238,13 +4423,16 @@ function approve_payment($payment_id, $admin_id) {
             throw new Exception('Payment not found');
         }
         
+        $receiptNumber = payment_receipt_number($payment);
+        $payment['receipt_number'] = $receiptNumber;
+
         // Update payment status
         $stmt = $conn->prepare("
             UPDATE payments 
-            SET payment_status = 'paid', approved_by = ?, approved_date = NOW()
+            SET payment_status = 'paid', receipt_number = ?, approved_by = ?, approved_date = NOW()
             WHERE payment_id = ?
         ");
-        $stmt->bind_param("ii", $admin_id, $payment_id);
+        $stmt->bind_param("sii", $receiptNumber, $admin_id, $payment_id);
         $stmt->execute();
         $stmt->close();
         
@@ -4261,7 +4449,7 @@ function approve_payment($payment_id, $admin_id) {
             INSERT INTO receipts (receipt_number, payment_id, user_id, amount, issued_date)
             VALUES (?, ?, ?, ?, NOW())
         ");
-        $stmt->bind_param("siid", $payment['receipt_number'], $payment_id, $payment['user_id'], 
+        $stmt->bind_param("siid", $receiptNumber, $payment_id, $payment['user_id'], 
                           $payment['amount']);
         $stmt->execute();
         $stmt->close();
@@ -4664,6 +4852,12 @@ function get_receipt_html($payment_id) {
     if (!$payment) {
         return "<p>Receipt not found</p>";
     }
+
+    if (!in_array($payment['payment_status'] ?? '', ['paid', 'approved', 'refund_requested', 'refund_rejected', 'refunded'], true)) {
+        return "<p>Official receipt is available only after payment is successful.</p>";
+    }
+
+    $payment['receipt_number'] = payment_receipt_number($payment);
     
     $html = '
     <div class="receipt" style="max-width: 400px; margin: 0 auto; padding: 20px; font-family: monospace;">
@@ -4697,3 +4891,4 @@ function get_receipt_html($payment_id) {
 }
 
 ?>
+

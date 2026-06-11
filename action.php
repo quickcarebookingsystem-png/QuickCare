@@ -143,6 +143,140 @@ if ($action === 'logout') {
 // PAYMENT ACTIONS (AJAX)
 // ============================================
 
+if ($action === 'start_toyyibpay') {
+    ensure_failed_payment_status($conn);
+    if (!isset($_SESSION['id'])) {
+        echo json_encode(['success' => false, 'message' => 'Please login first']);
+        exit;
+    }
+
+    $user_id = (int)$_SESSION['id'];
+    $appointment_code = trim($_POST['appointment_code'] ?? '');
+    $amount = (float)($_POST['amount'] ?? 0);
+    $remarks = trim($_POST['remarks'] ?? '');
+
+    if ($appointment_code === '' || $amount <= 0) {
+        echo json_encode(['success' => false, 'message' => 'Please select an appointment first']);
+        exit;
+    }
+
+    $stmt = $conn->prepare("
+        SELECT a.*, u.name AS user_name, u.email, u.phone_number
+        FROM appointments a
+        LEFT JOIN users u ON u.user_id = a.user_id
+        WHERE a.appointment_code = ? AND a.user_id = ?
+        LIMIT 1
+    ");
+    $stmt->bind_param("si", $appointment_code, $user_id);
+    $stmt->execute();
+    $appointment = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$appointment) {
+        echo json_encode(['success' => false, 'message' => 'Appointment not found']);
+        exit;
+    }
+
+    $user = [
+        'name' => $appointment['user_name'] ?? $appointment['name'] ?? '',
+        'email' => $appointment['email'] ?? '',
+        'phone_number' => $appointment['phone_number'] ?? '',
+    ];
+    $amount = (float)($appointment['amount'] ?? $amount);
+    $bill = create_toyyibpay_bill($appointment, $user);
+    if (empty($bill['success'])) {
+        echo json_encode(['success' => false, 'message' => $bill['message'] ?? 'Failed to create ToyyibPay bill']);
+        exit;
+    }
+
+    $stmt = $conn->prepare("
+        DELETE FROM payments
+        WHERE user_id = ?
+          AND appointment_code = ?
+          AND payment_status IN ('pending', 'failed')
+          AND payment_method = 'FPX / ToyyibPay'
+    ");
+    $stmt->bind_param("is", $user_id, $appointment_code);
+    $stmt->execute();
+    $stmt->close();
+
+    $result = submit_payment(
+        $user_id,
+        $appointment_code,
+        $amount,
+        $bill['bill_code'],
+        $remarks,
+        '',
+        'pending',
+        'FPX / ToyyibPay'
+    );
+
+    if (!$result) {
+        echo json_encode(['success' => false, 'message' => 'Failed to save payment record']);
+        exit;
+    }
+
+    echo json_encode(['success' => true, 'payment_url' => $bill['payment_url']]);
+    exit;
+}
+
+if ($action === 'toyyibpay_return' || $action === 'toyyibpay_callback') {
+    ensure_failed_payment_status($conn);
+    $billCode = $_GET['billcode'] ?? $_GET['billCode'] ?? $_POST['billcode'] ?? $_POST['billCode'] ?? '';
+    $statusId = (string)($_GET['status_id'] ?? $_POST['status_id'] ?? '');
+    $appointmentCode = '';
+
+    if ($billCode !== '') {
+        $stmt = $conn->prepare("SELECT appointment_code FROM payments WHERE transaction_id = ? LIMIT 1");
+        $stmt->bind_param("s", $billCode);
+        $stmt->execute();
+        $paymentRow = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        $appointmentCode = $paymentRow['appointment_code'] ?? '';
+    }
+
+    if ($billCode !== '' && $statusId === '1') {
+        mark_toyyibpay_payment_paid($billCode);
+    } elseif ($billCode !== '') {
+        $stmt = $conn->prepare("
+            UPDATE payments
+            SET payment_status = 'failed'
+            WHERE transaction_id = ?
+              AND payment_status NOT IN ('paid', 'approved')
+        ");
+        $stmt->bind_param("s", $billCode);
+        $stmt->execute();
+        $stmt->close();
+
+        if ($appointmentCode !== '') {
+            $stmt = $conn->prepare("
+                UPDATE appointments
+                SET payment_status = 'pending'
+                WHERE appointment_code = ?
+                  AND payment_status NOT IN ('paid', 'approved')
+            ");
+            $stmt->bind_param("s", $appointmentCode);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    if ($action === 'toyyibpay_callback') {
+        echo 'OK';
+        exit;
+    }
+
+    $_SESSION['QuickCare_message'] = $statusId === '1'
+        ? 'Payment successful.'
+        : 'Payment was cancelled or not completed.';
+    $_SESSION['QuickCare_message_type'] = $statusId === '1' ? 'success' : 'error';
+    $redirectUrl = $statusId === '1'
+        ? page_url('payment_history', 'user')
+        : page_url('payment', 'user') . ($appointmentCode !== '' ? '?appointment=' . urlencode($appointmentCode) : '');
+    redirect_to($redirectUrl);
+    exit;
+}
+
 // Handle submit payment (user upload receipt) - AJAX request
 if ($action === 'submit_payment') {
     // Check if user is logged in
@@ -293,9 +427,14 @@ if ($action === 'get_payment_details') {
         if ($payment_note['text'] !== '') {
             $remarks_html = '<div class="detail-row"><strong>' . htmlspecialchars($payment_note['label']) . '</strong> ' . nl2br(htmlspecialchars($payment_note['text'])) . '</div>';
         }
+        $hasOfficialReceipt = in_array($payment['payment_status'], ['paid', 'approved', 'refund_requested', 'refund_rejected', 'refunded'], true);
+        $referenceLabel = $hasOfficialReceipt ? 'Receipt #:' : 'Payment #:';
+        $referenceValue = $hasOfficialReceipt && trim((string)($payment['receipt_number'] ?? '')) !== ''
+            ? $payment['receipt_number']
+            : ($payment['payment_code'] ?? '-');
         $html = '
         <div class="payment-details-modal">
-            <div class="detail-row"><strong>Receipt #:</strong> ' . htmlspecialchars($payment['receipt_number']) . '</div>
+            <div class="detail-row"><strong>' . htmlspecialchars($referenceLabel) . '</strong> ' . htmlspecialchars($referenceValue) . '</div>
             <div class="detail-row"><strong>Patient:</strong> ' . htmlspecialchars($payment['user_name']) . '</div>
             <div class="detail-row"><strong>Email:</strong> ' . htmlspecialchars($payment['user_email']) . '</div>
             <div class="detail-row"><strong>Amount:</strong> RM ' . number_format($payment['amount'], 2) . '</div>

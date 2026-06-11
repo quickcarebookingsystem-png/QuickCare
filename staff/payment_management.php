@@ -24,6 +24,7 @@ $payments = get_all_payments();
                 <option value="pending">Pending</option>
                 <option value="verifying">Verifying</option>
                 <option value="approved">Paid</option>
+                <option value="failed">Failed</option>
                 <option value="rejected">Rejected</option>
                 <option value="refund_requested">Refund Requests</option>
                 <option value="refunded">Refunded</option>
@@ -39,7 +40,7 @@ $payments = get_all_payments();
                 <thead>
                     <tr>
                         <th>Date</th>
-                        <th>Receipt #</th>
+                        <th>Reference</th>
                         <th>Patient Name</th>
                         <th>Appointment</th>
                         <th>Amount</th>
@@ -72,10 +73,14 @@ $payments = get_all_payments();
                         $receiptToView = ($paymentStatus === 'refunded' && $refundReceiptFile !== '')
                             ? $refundReceiptFile
                             : ($payment['receipt_image'] ?? '');
+                        $hasOfficialReceipt = in_array($paymentStatus, ['paid', 'approved', 'refund_requested', 'refund_rejected', 'refunded'], true);
+                        $referenceValue = $hasOfficialReceipt && trim((string)($payment['receipt_number'] ?? '')) !== ''
+                            ? $payment['receipt_number']
+                            : ($payment['payment_code'] ?? '-');
                     ?>
                     <tr data-status="<?php echo htmlspecialchars($paymentGroup); ?>">
                         <td><?php echo date('d M Y', strtotime($payment['payment_date'])); ?></td>
-                        <td><?php echo htmlspecialchars($payment['receipt_number']); ?></td>
+                        <td><?php echo htmlspecialchars($referenceValue); ?></td>
                         <td><?php echo htmlspecialchars($payment['patient_name']); ?></td>
                         <td><?php echo htmlspecialchars($payment['appointment_code']); ?></td>
                         <td>RM <?php echo number_format($payment['amount'], 2); ?></td>
