@@ -107,19 +107,22 @@ if ($action === 'reset_password') {
         $user = verify_reset_token($conn, $token);
 
         if (!$user) {
-            $_SESSION['message'] = "Invalid or expired reset link.";
+            $_SESSION['QuickCare_message'] = "Invalid or expired reset link.";
+            $_SESSION['QuickCare_message_type'] = "error";
             redirect_to('forgot_password.php');
             exit();
         }
 
         if ($new_password !== $confirm_password) {
-            $_SESSION['message'] = "Passwords do not match.";
+            $_SESSION['QuickCare_message'] = "Passwords do not match.";
+            $_SESSION['QuickCare_message_type'] = "error";
             redirect_to('reset_password.php?token=' . $token);
             exit();
         }
 
         update_password($conn, $new_password, $user['email']);
-        $_SESSION['message'] = "Password reset successfully.";
+        $_SESSION['QuickCare_message'] = "Password reset successfully.";
+        $_SESSION['QuickCare_message_type'] = "success";
         redirect_to('login.php');
         exit();
     }
@@ -344,22 +347,38 @@ if ($action === 'toyyibpay_return' || $action === 'toyyibpay_callback') {
 // Handle submit payment (user upload receipt) - AJAX request
 if ($action === 'submit_payment') {
     // Check if user is logged in
-    if (!isset($_SESSION['id'])) {
-        echo json_encode(['success' => false, 'message' => 'Please login first']);
-        exit;
-    }
+    require_user_role($conn, 'user', true);
     
-    $user_id = $_SESSION['id'];
+    $user_id = (int) $_SESSION['id'];
     $appointment_code = $_POST['appointment_code'] ?? '';
-    $amount = $_POST['amount'] ?? 0;
     $remarks = $_POST['remarks'] ?? '';
     $payment_method = trim($_POST['payment_method'] ?? $_POST['payment_method_label'] ?? '');
     
     // Validate input (transaction_id no longer required)
-    if (empty($appointment_code) || empty($amount) || $payment_method === '') {
+    if (empty($appointment_code) || $payment_method === '') {
         echo json_encode(['success' => false, 'message' => 'Please fill in all required fields']);
         exit;
     }
+
+    $stmt = $conn->prepare("
+        SELECT amount
+        FROM appointments
+        WHERE appointment_code = ?
+          AND user_id = ?
+          AND payment_status IN ('pending', 'rejected', 'failed')
+        LIMIT 1
+    ");
+    $stmt->bind_param("si", $appointment_code, $user_id);
+    $stmt->execute();
+    $appointment = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$appointment) {
+        echo json_encode(['success' => false, 'message' => 'Appointment not found or cannot be paid']);
+        exit;
+    }
+
+    $amount = (float) $appointment['amount'];
     
     // Handle file upload
     $receipt_image = '';
@@ -370,20 +389,25 @@ if ($action === 'submit_payment') {
             mkdir($upload_dir, 0777, true);
         }
         
-        $file_extension = pathinfo($_FILES['receipt']['name'], PATHINFO_EXTENSION);
-        $receipt_image = 'receipt_' . time() . '_' . rand(1000, 9999) . '.' . $file_extension;
-        $upload_path = $upload_dir . $receipt_image;
-        
         if ($_FILES['receipt']['size'] > 2 * 1024 * 1024) {
             echo json_encode(['success' => false, 'message' => 'File too large. Max 2MB']);
             exit;
         }
         
-        $allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
-        if (!in_array($_FILES['receipt']['type'], $allowed_types)) {
+        $allowed_types = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'application/pdf' => 'pdf'];
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime_type = $finfo ? finfo_file($finfo, $_FILES['receipt']['tmp_name']) : '';
+        if ($finfo) {
+            finfo_close($finfo);
+        }
+
+        if (!isset($allowed_types[$mime_type])) {
             echo json_encode(['success' => false, 'message' => 'Invalid file type. JPG, PNG, PDF only']);
             exit;
         }
+
+        $receipt_image = 'receipt_' . time() . '_' . rand(1000, 9999) . '.' . $allowed_types[$mime_type];
+        $upload_path = $upload_dir . $receipt_image;
         
         if (!move_uploaded_file($_FILES['receipt']['tmp_name'], $upload_path)) {
             echo json_encode(['success' => false, 'message' => 'Failed to upload receipt']);
@@ -413,10 +437,7 @@ if ($action === 'submit_payment') {
 // Handle approve payment (admin only) - AJAX request
 if ($action === 'approve_payment') {
     // Check if user is admin
-    if (!isset($_SESSION['id']) || $_SESSION['QuickCare_role'] !== 'admin') {
-        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-        exit;
-    }
+    require_user_role($conn, 'admin', true);
     
     $payment_id = $_POST['payment_id'] ?? 0;
     $admin_id = $_SESSION['id'];
@@ -438,10 +459,7 @@ if ($action === 'approve_payment') {
 
 // Handle reject payment (admin only) - AJAX request
 if ($action === 'reject_payment') {
-    if (!isset($_SESSION['id']) || $_SESSION['QuickCare_role'] !== 'admin') {
-        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-        exit;
-    }
+    require_user_role($conn, 'admin', true);
     
     $payment_id = $_POST['payment_id'] ?? 0;
     $reason = $_POST['reason'] ?? 'No reason provided';
@@ -466,6 +484,7 @@ if ($action === 'reject_payment') {
 if ($action === 'get_payment_details') {
     global $conn;
     ensure_payment_method_column($conn);
+    require_user_role($conn, ['admin', 'staff'], true);
     
     $payment_id = $_POST['payment_id'] ?? 0;
     
@@ -519,7 +538,22 @@ if ($action === 'get_payment_details') {
 
 // Handle get receipt for printing - AJAX request
 if ($action === 'get_receipt') {
+    require_user_role($conn, ['admin', 'staff', 'user'], true);
     $payment_id = $_POST['payment_id'] ?? 0;
+
+    if (current_role($conn) === 'user') {
+        $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM payments WHERE payment_id = ? AND user_id = ?");
+        $userId = (int) $_SESSION['id'];
+        $stmt->bind_param("ii", $payment_id, $userId);
+        $stmt->execute();
+        $allowed = (int)($stmt->get_result()->fetch_assoc()['total'] ?? 0) > 0;
+        $stmt->close();
+
+        if (!$allowed) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit;
+        }
+    }
     
     $html = get_receipt_html($payment_id);
     
@@ -534,6 +568,7 @@ if ($action === 'get_receipt') {
 // Handle get pending payments count - AJAX request
 if ($action === 'get_pending_payments_count') {
     global $conn;
+    require_user_role($conn, ['admin', 'staff'], true);
     
     $result = $conn->query("SELECT COUNT(*) as count FROM payments WHERE payment_status IN ('verifying', 'refund_requested')");
     $row = $result->fetch_assoc();
@@ -675,6 +710,8 @@ if ($action === 'save_profile' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset
 }
 
 if ($action === 'save_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_user_role($conn, 'admin');
+
     $name = trim($_POST['name'] ?? '');
     $email = trim($_POST['email'] ?? '');
     $password = trim($_POST['password'] ?? '');
@@ -719,6 +756,8 @@ if ($action === 'save_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 if ($action === 'update_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_user_role($conn, 'admin');
+
     $id = (int)($_POST['id'] ?? 0);
     $name = trim($_POST['name'] ?? '');
     $email = trim($_POST['email'] ?? '');
@@ -779,6 +818,8 @@ if ($action === 'update_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_user_role($conn, 'user');
+
     $user = current_user($conn);
     $serviceInput = $_POST['service'] ?? '';
     $selectedServices = [];
@@ -975,7 +1016,7 @@ if ($action === 'save_appointment_notes' && $_SERVER['REQUEST_METHOD'] === 'POST
 
 if (in_array($action, ['cancel_appointment', 'approve', 'reject', 'update_status'], true)) {
     $appointmentCode = $_GET['id'] ?? $_POST['id'] ?? '';
-    $role = $_SESSION['QuickCare_role'] ?? '';
+    $role = current_role($conn);
     $cancelReason = trim($_POST['reason'] ?? '');
     $currentUser = null;
     $cancelledAppointmentForEmail = null;
@@ -1080,7 +1121,7 @@ if (in_array($action, ['cancel_appointment', 'approve', 'reject', 'update_status
 }
 
 if ($action === 'save_service' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+    if (!user_has_role($conn, 'admin')) {
         $_SESSION['QuickCare_message'] = 'Only admins can save services.';
         $_SESSION['QuickCare_message_type'] = 'error';
         redirect_to(app_url('login.php'));
@@ -1108,7 +1149,7 @@ if ($action === 'save_service' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 if ($action === 'update_service_overview' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+    if (!user_has_role($conn, 'admin')) {
         $_SESSION['QuickCare_message'] = 'Only admins can update service overview.';
         $_SESSION['QuickCare_message_type'] = 'error';
         redirect_to(app_url('login.php'));
@@ -1132,7 +1173,7 @@ if ($action === 'update_service_overview' && $_SERVER['REQUEST_METHOD'] === 'POS
 }
 
 if ($action === 'export_report') {
-    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+    if (!user_has_role($conn, 'admin')) {
         redirect_to(app_url('login.php'));
     }
 
@@ -1432,10 +1473,7 @@ if ($action === 'export_report') {
 
 // Handle refund request (user only) - AJAX request
 if ($action === 'request_refund') {
-    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'user') {
-        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-        exit;
-    }
+    require_user_role($conn, 'user', true);
 
     $payment_id = $_POST['payment_id'] ?? 0;
     $reason = $_POST['reason'] ?? 'No reason provided';
@@ -1458,10 +1496,7 @@ if ($action === 'request_refund') {
 
 // Handle refund payment (admin only) - AJAX request
 if ($action === 'refund_payment') {
-    if (!isset($_SESSION['id']) || $_SESSION['QuickCare_role'] !== 'admin') {
-        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-        exit;
-    }
+    require_user_role($conn, 'admin', true);
 
     $payment_id = $_POST['payment_id'] ?? 0;
     $reason = $_POST['reason'] ?? 'No reason provided';
@@ -1483,8 +1518,14 @@ if ($action === 'refund_payment') {
         exit;
     }
 
-    $allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
-    if (!in_array($_FILES['refund_receipt']['type'], $allowed_types, true)) {
+    $allowed_types = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'application/pdf' => 'pdf'];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime_type = $finfo ? finfo_file($finfo, $_FILES['refund_receipt']['tmp_name']) : '';
+    if ($finfo) {
+        finfo_close($finfo);
+    }
+
+    if (!isset($allowed_types[$mime_type])) {
         echo json_encode(['success' => false, 'message' => 'Invalid file type. JPG, PNG, PDF only']);
         exit;
     }
@@ -1494,8 +1535,7 @@ if ($action === 'refund_payment') {
         mkdir($upload_dir, 0777, true);
     }
 
-    $file_extension = strtolower(pathinfo($_FILES['refund_receipt']['name'], PATHINFO_EXTENSION));
-    $refund_receipt = 'refund_receipt_' . time() . '_' . rand(1000, 9999) . '.' . $file_extension;
+    $refund_receipt = 'refund_receipt_' . time() . '_' . rand(1000, 9999) . '.' . $allowed_types[$mime_type];
     if (!move_uploaded_file($_FILES['refund_receipt']['tmp_name'], $upload_dir . $refund_receipt)) {
         echo json_encode(['success' => false, 'message' => 'Failed to upload refund receipt']);
         exit;
@@ -1513,10 +1553,7 @@ if ($action === 'refund_payment') {
 
 // Handle reject refund request (admin only) - AJAX request
 if ($action === 'reject_refund') {
-    if (!isset($_SESSION['id']) || $_SESSION['QuickCare_role'] !== 'admin') {
-        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-        exit;
-    }
+    require_user_role($conn, 'admin', true);
 
     $payment_id = $_POST['payment_id'] ?? 0;
     $reason = $_POST['reason'] ?? 'No reason provided';
@@ -1538,7 +1575,7 @@ if ($action === 'reject_refund') {
 }
 
 if ($action === 'save_time_lock' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+    if (!user_has_role($conn, 'admin')) {
         $_SESSION['QuickCare_message'] = 'Only admins can manage time slots.';
         $_SESSION['QuickCare_message_type'] = 'error';
         redirect_to(app_url('login.php'));
@@ -1622,7 +1659,7 @@ if ($action === 'save_time_lock' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 if ($action === 'delete_time_lock') {
-    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+    if (!user_has_role($conn, 'admin')) {
         $_SESSION['QuickCare_message'] = 'Only admins can manage time slots.';
         $_SESSION['QuickCare_message_type'] = 'error';
         redirect_to(app_url('login.php'));
@@ -1639,6 +1676,8 @@ if ($action === 'delete_time_lock') {
 }
 
 if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_user_role($conn, 'admin');
+
     $id = (int)($_POST['id'] ?? 0);
     $name = trim($_POST['name'] ?? '');
     $specialization = trim($_POST['specialization'] ?? '');
@@ -1815,7 +1854,7 @@ if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 if ($action === 'update_doctor_description' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
+    if (!user_has_role($conn, 'admin')) {
         $_SESSION['QuickCare_message'] = 'Only admins can update doctor description.';
         $_SESSION['QuickCare_message_type'] = 'error';
         redirect_to(app_url('login.php'));
@@ -1839,6 +1878,8 @@ if ($action === 'update_doctor_description' && $_SERVER['REQUEST_METHOD'] === 'P
 }
 
 if ($action === 'delete') {
+    require_user_role($conn, 'admin');
+
     $type = $_GET['type'] ?? '';
     $id = (int)($_POST['id'] ?? $_GET['id'] ?? 0);
     if ($type === 'doctor' && $id > 0) {
@@ -1895,12 +1936,6 @@ if ($action === 'delete') {
         $stmt->execute();
         $stmt->close();
     } elseif ($type === 'service' && $id > 0) {
-        if (!isset($_SESSION['id']) || ($_SESSION['QuickCare_role'] ?? '') !== 'admin') {
-            $_SESSION['QuickCare_message'] = 'Only admins can delete services.';
-            $_SESSION['QuickCare_message_type'] = 'error';
-            redirect_to(app_url('login.php'));
-        }
-
         $stmt = $conn->prepare("DELETE FROM services WHERE service_id = ?");
         $stmt->bind_param("i", $id);
         $stmt->execute();

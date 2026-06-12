@@ -52,6 +52,7 @@ function initSidebarToggle() {
   const setSidebarOpen = (isOpen) => {
     sidebar.classList.toggle('open', isOpen);
     backdrop.classList.toggle('active', isOpen);
+    document.body.classList.toggle('sidebar-open', isOpen && isMobileSidebar());
     toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
     toggle.setAttribute('aria-label', isOpen ? 'Close menu' : 'Open menu');
   };
@@ -86,6 +87,7 @@ function initSidebarToggle() {
   window.addEventListener('resize', () => {
     if (!isMobileSidebar()) {
       setSidebarOpen(false);
+      document.body.classList.remove('sidebar-open');
     }
   });
 }

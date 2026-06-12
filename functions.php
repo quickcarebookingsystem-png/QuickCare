@@ -144,7 +144,14 @@ function action_url($action, $params = []) {
 }
 
 function redirect_to($url) {
-    header('Location: ' . $url);
+    if (!headers_sent()) {
+        header('Location: ' . $url);
+        exit;
+    }
+
+    $safeUrl = e($url);
+    echo '<script>window.location.href = ' . json_encode($url) . ';</script>';
+    echo '<noscript><meta http-equiv="refresh" content="0;url=' . $safeUrl . '"></noscript>';
     exit;
 }
 
@@ -163,6 +170,35 @@ function protect_page() {
         session_unset();
         session_destroy();
         redirect_to(app_url('login.php'));
+    }
+}
+
+function current_role($conn) {
+    $user = current_user($conn);
+    if (!$user) {
+        return '';
+    }
+
+    $_SESSION['QuickCare_role'] = $user['role'];
+    $_SESSION['name'] = $user['name'];
+    return (string) $user['role'];
+}
+
+function user_has_role($conn, $roles) {
+    $roles = is_array($roles) ? $roles : [$roles];
+    return in_array(current_role($conn), $roles, true);
+}
+
+function require_user_role($conn, $roles, $json = false, $redirect = null) {
+    if (!isset($_SESSION['id']) || !user_has_role($conn, $roles)) {
+        if ($json) {
+            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+            exit;
+        }
+
+        $_SESSION['QuickCare_message'] = 'You are not allowed to access that page.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($redirect ?: page_url('dashboard', current_role($conn) ?: 'user'));
     }
 }
 
@@ -855,7 +891,7 @@ function app_header($title) {
     echo '<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">';
     echo '<link rel="stylesheet" href="style.css?v=' . e($styleVersion) . '"></head>';
     if (isset($_SESSION['message'])) {
-        echo "<script>alert('" . $_SESSION['message'] . "');</script>";
+        echo '<script>alert(' . json_encode((string) $_SESSION['message']) . ');</script>';
         unset($_SESSION['message']);
     }
 }
@@ -885,7 +921,7 @@ function render_notification($placement = 'toast') {
 function app_start($role, $page, $title = null) {
     global $PAGE_TITLES, $conn;
     ensure_failed_payment_status($conn);
-    $_SESSION['QuickCare_role'] = $role;
+    require_user_role($conn, $role);
     $title = $title ?: ($PAGE_TITLES[$page] ?? 'Dashboard');
     echo '<body><div id="app" class="view active">';
     render_sidebar($conn, $role, $page);
@@ -4368,8 +4404,9 @@ function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $
         SELECT a.*, a.doctor_name, a.service_name, a.appointment_date, a.appointment_time
         FROM appointments a
         WHERE a.appointment_code = ?
+          AND a.user_id = ?
     ");
-    $stmt->bind_param("s", $appointment_code);
+    $stmt->bind_param("si", $appointment_code, $user_id);
     $stmt->execute();
     $appointment = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -4378,6 +4415,7 @@ function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $
         return false;
     }
     
+    $amount = (float) $appointment['amount'];
     $payment_code = generate_payment_code();
     $receipt_number = in_array($payment_status, ['paid', 'approved'], true) ? generate_receipt_number() : null;
     
