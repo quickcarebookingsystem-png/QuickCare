@@ -126,7 +126,10 @@ function app_url($path) {
 }
 
 function absolute_app_url($path) {
-    $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    $forwardedProto = strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || $forwardedProto === 'https'
+        || (strtolower((string)($_SERVER['HTTP_X_FORWARDED_SSL'] ?? '')) === 'on');
     $scheme = $https ? 'https' : 'http';
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
     return $scheme . '://' . $host . app_url($path);
@@ -1615,6 +1618,7 @@ function create_toyyibpay_bill($appointment, $user) {
 
     $billName = 'QuickCare ' . ($appointment['appointment_code'] ?? 'Appointment');
     $billDescription = trim(($appointment['service_name'] ?? 'Clinic appointment') . ' - ' . ($appointment['doctor_name'] ?? ''));
+    $billPhone = preg_replace('/\D+/', '', (string)($user['phone_number'] ?? ''));
     $payload = [
         'userSecretKey' => $config['secret_key'],
         'categoryCode' => $config['category_code'],
@@ -1628,7 +1632,7 @@ function create_toyyibpay_bill($appointment, $user) {
         'billExternalReferenceNo' => (string)($appointment['appointment_code'] ?? ''),
         'billTo' => (string)($user['name'] ?? $appointment['name'] ?? 'QuickCare Patient'),
         'billEmail' => (string)($user['email'] ?? ''),
-        'billPhone' => (string)($user['phone_number'] ?? ''),
+        'billPhone' => $billPhone,
         'billPaymentChannel' => 0,
         'billContentEmail' => 'Thank you for your QuickCare payment.',
         'billChargeToCustomer' => 1,
@@ -1655,9 +1659,26 @@ function create_toyyibpay_bill($appointment, $user) {
     }
 
     $response = json_decode($rawResponse, true);
-    $billCode = $response[0]['BillCode'] ?? $response['BillCode'] ?? '';
+    if (!is_array($response)) {
+        return ['success' => false, 'message' => 'ToyyibPay returned an invalid response: ' . substr(trim($rawResponse), 0, 180)];
+    }
+
+    $firstResponse = isset($response[0]) && is_array($response[0]) ? $response[0] : $response;
+    $billCode = $firstResponse['BillCode'] ?? $firstResponse['billCode'] ?? $firstResponse['billcode'] ?? '';
     if ($billCode === '') {
-        return ['success' => false, 'message' => 'ToyyibPay did not return a bill code.'];
+        $errorMessage = $firstResponse['msg']
+            ?? $firstResponse['message']
+            ?? $firstResponse['error']
+            ?? $firstResponse['status']
+            ?? '';
+        if (is_array($errorMessage)) {
+            $errorMessage = json_encode($errorMessage);
+        }
+        $errorMessage = trim((string)$errorMessage);
+        if ($errorMessage === '') {
+            $errorMessage = substr(json_encode($response), 0, 180);
+        }
+        return ['success' => false, 'message' => 'ToyyibPay did not return a bill code: ' . $errorMessage];
     }
 
     return [

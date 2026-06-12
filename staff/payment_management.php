@@ -45,7 +45,7 @@ $payments = get_all_payments();
                         <th>Appointment</th>
                         <th>Amount</th>
                         <th>Status</th>
-                        <th>Receipt</th>
+                        <th>Proof</th>
                         <th>Details</th>
                     </tr>
                 </thead>
@@ -117,7 +117,7 @@ $payments = get_all_payments();
 <div id="receiptViewModal" class="modal-overlay" style="display: none;">
     <div class="modal">
         <div class="modal-header">
-            <span class="modal-title">📷 Payment Receipt</span>
+            <span class="modal-title">📷 Payment Proof</span>
             <button class="modal-close" onclick="closeReceiptViewModal()">✕</button>
         </div>
         <div class="modal-body" style="text-align: center;">
