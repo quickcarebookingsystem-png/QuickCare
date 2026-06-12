@@ -33,6 +33,26 @@ if ($action === 'register') {
         } 
 
         if (create_user($conn, $name, $email, $password, $role)) {
+            $loginLink = absolute_app_url('login.php');
+            $safeName = htmlspecialchars($name);
+            $safeEmail = htmlspecialchars($email);
+            $safeLoginLink = htmlspecialchars($loginLink);
+            $subject = "Registration Successful - QuickCare";
+            $body = "
+                <h2>Registration Successful ✅</h2>
+                <p>Dear {$safeName},</p>
+                <p>Your QuickCare account has been <strong>CREATED SUCCESSFULLY</strong>.</p>
+                <h3>Account Details:</h3>
+                <ul>
+                    <li><strong>Name:</strong> {$safeName}</li>
+                    <li><strong>Email:</strong> {$safeEmail}</li>
+                </ul>
+                <p>You can now log in to book appointments, view your appointment history, and manage payments.</p>
+                <p><a href='{$safeLoginLink}'>Login to QuickCare</a></p>
+                <br>
+                <p>Thank you for using QuickCare!</p>";
+            send_email($email, $subject, $body);
+
             $_SESSION['QuickCare_message'] = "Registration successful. Please log in.";
             $_SESSION['QuickCare_message_type'] = "success";
             redirect_to('login.php');
@@ -49,10 +69,12 @@ if ($action === 'login') {
         $user = get_user_by_email($conn, $email);
         if ($user) {
             if (password_verify($password, $user['password'])) {
-                update_user_status($conn, (int)$user['user_id'], 'active');
-                $_SESSION['id'] = $user['user_id'];
-                $_SESSION['name'] = $user['name'];
-                $_SESSION['QuickCare_role'] = $user['role'];
+                if (!create_login_session($conn, $user)) {
+                    $_SESSION['QuickCare_message'] = "Unable to start login session. Please try again.";
+                    $_SESSION['QuickCare_message_type'] = "error";
+                    redirect_to('login.php');
+                    exit();
+                }
                 $_SESSION['QuickCare_message'] = "Login successful.";
                 $_SESSION['QuickCare_message_type'] = "success";
                 redirect_to(page_url('dashboard', $user['role']));
@@ -133,9 +155,7 @@ if ($action === 'reset_password') {
 // ============================================
 
 if ($action === 'logout') {
-    if (isset($_SESSION['id'])) {
-        update_user_status($conn, (int)$_SESSION['id'], 'inactive');
-    }
+    clear_current_login_session($conn);
     session_unset();
     session_destroy();
     redirect_to('login.php');
@@ -148,10 +168,7 @@ if ($action === 'logout') {
 
 if ($action === 'start_toyyibpay') {
     ensure_failed_payment_status($conn);
-    if (!isset($_SESSION['id'])) {
-        echo json_encode(['success' => false, 'message' => 'Please login first']);
-        exit;
-    }
+    require_user_role($conn, 'user', true);
 
     $user_id = (int)$_SESSION['id'];
     $appointment_code = trim($_POST['appointment_code'] ?? '');
@@ -185,6 +202,12 @@ if ($action === 'start_toyyibpay') {
         'email' => $appointment['email'] ?? '',
         'phone_number' => $appointment['phone_number'] ?? '',
     ];
+
+    if (preg_replace('/\D+/', '', (string)$user['phone_number']) === '') {
+        echo json_encode(['success' => false, 'message' => 'Please add your phone number in My Profile before paying with ToyyibPay.']);
+        exit;
+    }
+
     $amount = (float)($appointment['amount'] ?? $amount);
     $bill = create_toyyibpay_bill($appointment, $user);
     if (empty($bill['success'])) {
@@ -225,10 +248,7 @@ if ($action === 'start_toyyibpay') {
 
 if ($action === 'fail_toyyibpay_pending') {
     ensure_failed_payment_status($conn);
-    if (!isset($_SESSION['id'])) {
-        echo json_encode(['success' => false, 'message' => 'Please login first']);
-        exit;
-    }
+    require_user_role($conn, 'user', true);
 
     $user_id = (int)$_SESSION['id'];
     $billCode = trim($_POST['bill_code'] ?? '');
@@ -579,7 +599,7 @@ if ($action === 'get_pending_payments_count') {
 
 // ===========================================
 if ($action === 'change_password' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $user = current_user($conn);
+    $user = active_session_user($conn);
     $currentPassword = trim($_POST['current_password'] ?? '');
     $newPassword = trim($_POST['new_password'] ?? '');
     $confirmPassword = trim($_POST['confirm_password'] ?? '');
@@ -615,7 +635,9 @@ if ($action === 'change_password' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect_to($back);
 }
 
-if ($action === 'save_profile' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SESSION['id'], $_POST['name'], $_POST['email'])) {
+if ($action === 'save_profile' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['name'], $_POST['email'])) {
+    require_user_role($conn, ['user', 'staff', 'admin']);
+
     $id = (int) $_SESSION['id'];
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
@@ -901,6 +923,12 @@ if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $availableDay = $dateObj->format('D');
     $appointmentTime = strlen($time) === 5 ? $time . ':00' : $time;
+    if (appointment_time_has_passed($date, $appointmentTime)) {
+        $_SESSION['QuickCare_message'] = "Please choose an available future time slot.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    }
+
     ensure_doctor_schedule_break_columns($conn);
     $stmt = $conn->prepare("
         SELECT COUNT(*) AS total
@@ -1002,6 +1030,8 @@ if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 if ($action === 'save_appointment_notes' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_user_role($conn, 'user');
+
     $user = current_user($conn);
     $appointmentCode = trim($_POST['appointment_code'] ?? '');
     $notes = trim($_POST['notes'] ?? '');
@@ -1015,6 +1045,8 @@ if ($action === 'save_appointment_notes' && $_SERVER['REQUEST_METHOD'] === 'POST
 }
 
 if (in_array($action, ['cancel_appointment', 'approve', 'reject', 'update_status'], true)) {
+    require_user_role($conn, ['user', 'staff', 'admin']);
+
     $appointmentCode = $_GET['id'] ?? $_POST['id'] ?? '';
     $role = current_role($conn);
     $cancelReason = trim($_POST['reason'] ?? '');

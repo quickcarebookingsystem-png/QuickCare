@@ -169,11 +169,21 @@ function protect_page() {
         redirect_to(app_url('login.php'));
     }
 
-    if (isset($conn) && !current_user($conn)) {
-        session_unset();
-        session_destroy();
+    if (isset($conn) && !active_session_user($conn)) {
+        reset_session_with_message(
+            'Your account was logged in from another device. Please login again.',
+            'error'
+        );
         redirect_to(app_url('login.php'));
     }
+}
+
+function reset_session_with_message($message, $type = 'error') {
+    session_unset();
+    session_destroy();
+    session_start();
+    $_SESSION['QuickCare_message'] = $message;
+    $_SESSION['QuickCare_message_type'] = $type;
 }
 
 function current_role($conn) {
@@ -193,7 +203,7 @@ function user_has_role($conn, $roles) {
 }
 
 function require_user_role($conn, $roles, $json = false, $redirect = null) {
-    if (!isset($_SESSION['id']) || !user_has_role($conn, $roles)) {
+    if (!isset($_SESSION['id']) || !active_session_user($conn) || !user_has_role($conn, $roles)) {
         if ($json) {
             echo json_encode(['success' => false, 'message' => 'Unauthorized']);
             exit;
@@ -206,11 +216,20 @@ function require_user_role($conn, $roles, $json = false, $redirect = null) {
 }
 
 function guest_only() {
+    global $conn;
+
     header("Cache-Control: no-cache, no-store, must-revalidate");
     header("Pragma: no-cache");
     header("Expires: 0");
 
     if (isset($_SESSION['id'])) {
+        if (isset($conn) && !active_session_user($conn)) {
+            reset_session_with_message(
+                'Your account was logged in from another device. Please login again.',
+                'error'
+            );
+            return;
+        }
 
         redirect_to(
             page_url('dashboard', $_SESSION['QuickCare_role'])
@@ -242,6 +261,80 @@ function current_user($conn) {
     $user = $result->fetch_assoc();
     $stmt->close();
     return $user;
+}
+
+function ensure_session_token_column($conn) {
+    $columnCheck = $conn->query("SHOW COLUMNS FROM users LIKE 'session_token'");
+    if ($columnCheck && $columnCheck->num_rows > 0) {
+        return true;
+    }
+
+    return (bool) $conn->query("ALTER TABLE users ADD COLUMN session_token VARCHAR(128) NULL AFTER user_status");
+}
+
+function create_login_session($conn, $user) {
+    ensure_session_token_column($conn);
+
+    session_regenerate_id(true);
+    $userId = (int)($user['user_id'] ?? 0);
+    $sessionToken = bin2hex(random_bytes(32));
+
+    $stmt = $conn->prepare("UPDATE users SET user_status = 'active', session_token = ? WHERE user_id = ?");
+    if (!$stmt) {
+        return false;
+    }
+
+    $stmt->bind_param("si", $sessionToken, $userId);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    if (!$ok) {
+        return false;
+    }
+
+    $_SESSION['id'] = $userId;
+    $_SESSION['name'] = $user['name'];
+    $_SESSION['QuickCare_role'] = $user['role'];
+    $_SESSION['session_token'] = $sessionToken;
+    return true;
+}
+
+function active_session_user($conn) {
+    $user = current_user($conn);
+    if (!$user) {
+        return null;
+    }
+
+    ensure_session_token_column($conn);
+    $sessionToken = (string)($_SESSION['session_token'] ?? '');
+    $storedToken = (string)($user['session_token'] ?? '');
+    if ($sessionToken === '' || $storedToken === '' || !hash_equals($storedToken, $sessionToken)) {
+        return null;
+    }
+
+    return $user;
+}
+
+function clear_current_login_session($conn) {
+    if (!isset($_SESSION['id'])) {
+        return;
+    }
+
+    ensure_session_token_column($conn);
+    $userId = (int)$_SESSION['id'];
+    $sessionToken = (string)($_SESSION['session_token'] ?? '');
+    if ($sessionToken === '') {
+        return;
+    }
+
+    $stmt = $conn->prepare("UPDATE users SET user_status = 'inactive', session_token = NULL WHERE user_id = ? AND session_token = ?");
+    if (!$stmt) {
+        return;
+    }
+
+    $stmt->bind_param("is", $userId, $sessionToken);
+    $stmt->execute();
+    $stmt->close();
 }
 
 function update_user_status($conn, $userId, $status) {
@@ -301,12 +394,15 @@ function send_email($to, $subject, $body) {
         $mail->Port = 587; //email server port (TLS587, SSL465)
         $mail->setFrom('nshuzheng@gmail.com', 'QuickCare'); //from QuickCare
         $mail->addAddress($to); //to user email
+        $mail->CharSet = 'UTF-8';
         $mail->isHTML(true);
         $mail->Subject = $subject;
         $mail->Body = $body;
+        $mail->AltBody = strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $body));
         $mail->send();
         return true;
     } catch (Exception $e) {
+        error_log('QuickCare email failed: ' . $mail->ErrorInfo);
         return false;
     }
 }
@@ -1619,6 +1715,10 @@ function create_toyyibpay_bill($appointment, $user) {
     $billName = 'QuickCare ' . ($appointment['appointment_code'] ?? 'Appointment');
     $billDescription = trim(($appointment['service_name'] ?? 'Clinic appointment') . ' - ' . ($appointment['doctor_name'] ?? ''));
     $billPhone = preg_replace('/\D+/', '', (string)($user['phone_number'] ?? ''));
+    if ($billPhone === '') {
+        return ['success' => false, 'message' => 'Please add your phone number in My Profile before paying with ToyyibPay.'];
+    }
+
     $payload = [
         'userSecretKey' => $config['secret_key'],
         'categoryCode' => $config['category_code'],
@@ -2850,13 +2950,42 @@ function render_book() {
 
         function selectedDayName() {
             if (!state.date) return "";
-            var date = new Date(state.date + "T00:00:00");
-            if (Number.isNaN(date.getTime())) return "";
+            return dayNameForDateValue(state.date);
+        }
+
+        function dateFromValue(value) {
+            var date = new Date(value + "T00:00:00");
+            return Number.isNaN(date.getTime()) ? null : date;
+        }
+
+        function formatDateValue(date) {
+            var year = date.getFullYear();
+            var month = String(date.getMonth() + 1).padStart(2, "0");
+            var day = String(date.getDate()).padStart(2, "0");
+            return year + "-" + month + "-" + day;
+        }
+
+        function dayNameForDateValue(value) {
+            var date = dateFromValue(value);
+            if (!date) return "";
             return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()];
         }
 
+        function slotTimeHasPassed(dateValue, slot) {
+            if (!minDate || dateValue !== minDate) return false;
+            var parts = slot.split(":");
+            var slotMinutes = (Number(parts[0]) * 60) + Number(parts[1]);
+            var now = new Date();
+            var nowMinutes = (now.getHours() * 60) + now.getMinutes();
+            return slotMinutes <= nowMinutes;
+        }
+
         function lockedReasonForSlot(slot) {
-            var locks = ((lockedSlots[state.doctor] || {})[state.date] || []);
+            return lockedReasonForSlotOnDate(state.doctor, state.date, slot);
+        }
+
+        function lockedReasonForSlotOnDate(doctor, dateValue, slot) {
+            var locks = ((lockedSlots[doctor] || {})[dateValue] || []);
             var slotParts = slot.split(":");
             var slotEndMinutes = (Number(slotParts[0]) * 60) + Number(slotParts[1]) + 30;
             for (var i = 0; i < locks.length; i++) {
@@ -2873,6 +3002,47 @@ function render_book() {
                 }
             }
             return "";
+        }
+
+        function slotIsAvailableOnDate(doctor, dateValue, slot) {
+            var dayName = dayNameForDateValue(dateValue);
+            var slots = ((doctorSchedules[doctor] || {})[dayName] || []);
+            var booked = ((bookedSlots[doctor] || {})[dateValue] || []);
+            return slots.indexOf(slot) !== -1
+                && booked.indexOf(slot) === -1
+                && lockedReasonForSlotOnDate(doctor, dateValue, slot) === ""
+                && !slotTimeHasPassed(dateValue, slot);
+        }
+
+        function findNearestAvailableDate(doctor) {
+            var startDate = dateFromValue(minDate);
+            if (!doctor || !startDate) return "";
+
+            for (var offset = 0; offset < 90; offset++) {
+                var candidate = new Date(startDate);
+                candidate.setDate(startDate.getDate() + offset);
+                var dateValue = formatDateValue(candidate);
+                var dayName = dayNameForDateValue(dateValue);
+                var slots = ((doctorSchedules[doctor] || {})[dayName] || []);
+                for (var i = 0; i < slots.length; i++) {
+                    if (slotIsAvailableOnDate(doctor, dateValue, slots[i])) {
+                        return dateValue;
+                    }
+                }
+            }
+
+            return "";
+        }
+
+        function moveToNearestAvailableDateForDoctor() {
+            if (!dateInput || !state.doctor) return;
+            var nearestDate = findNearestAvailableDate(state.doctor);
+            if (!nearestDate) return;
+            if (state.date !== nearestDate) {
+                state.date = nearestDate;
+                dateInput.value = nearestDate;
+                showBookingNotice("Showing the nearest available date for this doctor: " + formatDate(nearestDate), "success");
+            }
         }
 
         function renderTimeSlots() {
@@ -2901,13 +3071,14 @@ function render_book() {
                 var isBooked = booked.indexOf(slot) !== -1;
                 var lockReason = lockedReasonForSlot(slot);
                 var isLocked = lockReason !== "";
+                var isPast = slotTimeHasPassed(state.date, slot);
                 btn.type = "button";
-                btn.className = "book-time-slot js-time-slot" + ((isBooked || isLocked) ? " unavailable" : "");
+                btn.className = "book-time-slot js-time-slot" + ((isBooked || isLocked || isPast) ? " unavailable" : "");
                 btn.dataset.time = slot;
                 btn.textContent = slot;
-                btn.disabled = isBooked || isLocked;
-                if (isBooked || isLocked) {
-                    btn.title = isBooked ? "Already booked" : lockReason;
+                btn.disabled = isBooked || isLocked || isPast;
+                if (isBooked || isLocked || isPast) {
+                    btn.title = isBooked ? "Already booked" : (isPast ? "Time has passed" : lockReason);
                     timeGrid.appendChild(btn);
                     return;
                 }
@@ -3069,6 +3240,7 @@ function render_book() {
                 state.doctor = btn.getAttribute("data-doctor-name") || "";
                 state.doctorSpecialist = btn.getAttribute("data-doctor-specialist") || "";
                 doctorInput.value = state.doctor;
+                moveToNearestAvailableDateForDoctor();
                 renderTimeSlots();
                 updateSummary();
             });
