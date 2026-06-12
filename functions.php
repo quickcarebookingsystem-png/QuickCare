@@ -3092,21 +3092,6 @@ function render_book() {
     </script>';
 }
 
-function render_payment($role) {
-    global $conn;
-    $appointments = get_appointments($conn, $role);
-    $payAmount = $appointments[0]['amount'] ?? '0.00';
-    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">' . ($role === 'user' ? 'Make Payment' : 'Manage Payments') . '</span></div><div class="card-body"><form method="post" action="action.php"><input type="hidden" name="action" value="process_payment"><div class="form-group"><label>Select Appointment</label><select class="form-control" name="appointment">';
-    foreach ($appointments as $a) {
-        echo '<option value="' . e($a['appointment_code']) . '">' . e($a['appointment_code'] . ' - ' . $a['service_name'] . ' - RM ' . number_format((float) $a['amount'], 2)) . '</option>';
-    }
-    echo '</select></div><h3 class="mb-16">Payment Method</h3><div class="payment-methods"><label class="payment-method selected"><input type="radio" name="method" value="card" checked><span class="pm-icon">Card</span>Credit Card</label><label class="payment-method"><input type="radio" name="method" value="bank"><span class="pm-icon">Bank</span>Online Banking</label><label class="payment-method"><input type="radio" name="method" value="wallet"><span class="pm-icon">Wallet</span>e-Wallet</label></div><div class="form-group"><label>Card Number</label><input class="form-control" placeholder="1234 5678 9012 3456"></div><button class="btn btn-primary">Pay RM ' . e(number_format((float) $payAmount, 2)) . '</button></form></div></div><div class="card"><div class="card-header"><span class="card-title">Payment History</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>Appointment</th><th>Date</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>';
-    foreach ($appointments as $a) {
-        echo '<tr><td>' . e($a['appointment_code']) . '</td><td>' . e(format_date_display($a['appointment_date'])) . '</td><td>RM ' . e(number_format((float) $a['amount'], 2)) . '</td><td>' . badge($a['payment_status']) . '</td><td><a class="btn btn-sm btn-outline" href="' . e(action_url('receipt', ['id' => $a['appointment_code']])) . '">Receipt</a></td></tr>';
-    }
-    echo '</tbody></table></div></div></div>';
-}
-
 function render_reports() {
     global $conn;
     $currentMonth = (int)date('n');

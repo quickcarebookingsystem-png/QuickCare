@@ -1956,7 +1956,6 @@ $message = match ($action) {
     'approve' => 'Appointment approved.',
     'reject' => 'Appointment rejected.',
     'update_status' => 'Status updated.',
-    'process_payment' => 'Payment processed successfully.',
     'export_report' => 'Report exported.',
     'delete' => $message ?? 'Deleted successfully.',
     'submit_payment' => 'Payment submitted successfully. Please wait for admin approval.',

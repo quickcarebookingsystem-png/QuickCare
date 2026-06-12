@@ -8,17 +8,6 @@ function closeModal(id) {
   if (modal) modal.classList.remove('active');
 }
 
-function selectPM(el) {
-  document.querySelectorAll('.payment-method').forEach(p => p.classList.remove('selected'));
-  el.classList.add('selected');
-}
-
-document.querySelectorAll('.modal-overlay').forEach(el => {
-  el.addEventListener('click', e => {
-    if (e.target === el) return;
-  });
-});
-
 function formatPhoneInput(value) {
   let digits = value.replace(/\D/g, '');
   if (digits.startsWith('60')) digits = digits.slice(2);
