@@ -234,7 +234,7 @@ function protect_page() {
     }
 
     if (isset($conn) && !active_session_user($conn)) {
-        reset_session_with_message('Please login again.', 'error');
+        clear_local_session();
         redirect_to(app_url('login.php'));
     }
 }
@@ -328,30 +328,39 @@ function current_user($conn) {
 }
 
 function ensure_user_last_seen_column($conn) {
-    static $checked = false;
-    if ($checked) {
-        return;
+    static $available = null;
+    if ($available !== null) {
+        return $available;
     }
-    $checked = true;
 
     $result = $conn->query("SHOW COLUMNS FROM users LIKE 'last_seen'");
     if ($result && $result->num_rows > 0) {
         $result->close();
-        return;
+        $available = true;
+        return true;
     }
     if ($result) {
         $result->close();
     }
 
     $conn->query("ALTER TABLE users ADD COLUMN last_seen DATETIME NULL AFTER user_status");
+    $result = $conn->query("SHOW COLUMNS FROM users LIKE 'last_seen'");
+    $available = $result && $result->num_rows > 0;
+    if ($result) {
+        $result->close();
+    }
+    return $available;
 }
 
 function create_login_session($conn, $user) {
     session_regenerate_id(true);
     $userId = (int)($user['user_id'] ?? 0);
-    ensure_user_last_seen_column($conn);
+    $hasLastSeen = ensure_user_last_seen_column($conn);
 
-    $stmt = $conn->prepare("UPDATE users SET user_status = 'active', last_seen = NOW() WHERE user_id = ?");
+    $sql = $hasLastSeen
+        ? "UPDATE users SET user_status = 'active', last_seen = NOW() WHERE user_id = ?"
+        : "UPDATE users SET user_status = 'active' WHERE user_id = ?";
+    $stmt = $conn->prepare($sql);
     if (!$stmt) {
         return false;
     }
@@ -372,30 +381,25 @@ function create_login_session($conn, $user) {
 }
 
 function active_session_user($conn) {
-    ensure_user_last_seen_column($conn);
+    $hasLastSeen = ensure_user_last_seen_column($conn);
     $user = current_user($conn);
     if (!$user) {
         return null;
     }
 
-    if (strtolower((string)($user['user_status'] ?? 'inactive')) !== 'active') {
-        return null;
-    }
-
-    $lastSeen = strtotime((string)($user['last_seen'] ?? ''));
-    if ($lastSeen > 0 && $lastSeen < strtotime('-30 minutes')) {
-        update_user_status($conn, (int)$user['user_id'], 'inactive');
-        return null;
-    }
-
     $userId = (int)$user['user_id'];
-    $stmt = $conn->prepare("UPDATE users SET last_seen = NOW() WHERE user_id = ?");
-    if ($stmt) {
-        $stmt->bind_param("i", $userId);
-        $stmt->execute();
-        $stmt->close();
+    if ($hasLastSeen) {
+        $stmt = $conn->prepare("UPDATE users SET user_status = 'active', last_seen = NOW() WHERE user_id = ?");
+        if ($stmt) {
+            $stmt->bind_param("i", $userId);
+            $stmt->execute();
+            $stmt->close();
+        }
+    } elseif (strtolower((string)($user['user_status'] ?? 'inactive')) !== 'active') {
+        update_user_status($conn, $userId, 'active');
     }
 
+    $user['user_status'] = 'active';
     return $user;
 }
 
@@ -412,9 +416,12 @@ function update_user_status($conn, $userId, $status) {
     if (!in_array($status, ['active', 'inactive'], true)) {
         return false;
     }
-    ensure_user_last_seen_column($conn);
+    $hasLastSeen = ensure_user_last_seen_column($conn);
 
-    $stmt = $conn->prepare("UPDATE users SET user_status = ?, last_seen = " . ($status === 'active' ? 'NOW()' : 'NULL') . " WHERE user_id = ?");
+    $sql = $hasLastSeen
+        ? "UPDATE users SET user_status = ?, last_seen = " . ($status === 'active' ? 'NOW()' : 'NULL') . " WHERE user_id = ?"
+        : "UPDATE users SET user_status = ? WHERE user_id = ?";
+    $stmt = $conn->prepare($sql);
     if (!$stmt) {
         return false;
     }
@@ -1599,8 +1606,11 @@ function render_stats($role) {
         "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected')"
     );
     $totalRevenue = (float) ($revenueRows[0]['total'] ?? 0);
-    ensure_user_last_seen_column($conn);
-    $totalActiveStaff = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ? AND user_status = ? AND last_seen >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)", 'ss', ['staff', 'active'])[0]['total'] ?? 0);
+    if (ensure_user_last_seen_column($conn)) {
+        $totalActiveStaff = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ? AND user_status = ? AND last_seen >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)", 'ss', ['staff', 'active'])[0]['total'] ?? 0);
+    } else {
+        $totalActiveStaff = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ? AND user_status = ?", 'ss', ['staff', 'active'])[0]['total'] ?? 0);
+    }
 
     $stats = [
         'user' => [['📅','primary',$upcomingAppointments,'Upcoming Appointments',''], ['✅','success',$completedAppointments,'Completed',''], ['⏳','warning',$pendingPayments,'Pending Payment','']],

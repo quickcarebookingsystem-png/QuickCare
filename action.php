@@ -618,7 +618,7 @@ if ($action === 'change_password' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $back = $_SERVER['HTTP_REFERER'] ?? page_url('profile');
 
     if (!$user) {
-        $_SESSION['QuickCare_message'] = "Please login again.";
+        $_SESSION['QuickCare_message'] = "Session expired. Please log in.";
         $_SESSION['QuickCare_message_type'] = "error";
         redirect_to(app_url('login.php'));
     }
