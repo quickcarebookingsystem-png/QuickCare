@@ -226,10 +226,7 @@ function protect_page() {
     }
 
     if (isset($conn) && !active_session_user($conn)) {
-        reset_session_with_message(
-            'Your account was logged in from another device. Please login again.',
-            'error'
-        );
+        reset_session_with_message('Please login again.', 'error');
         redirect_to(app_url('login.php'));
     }
 }
@@ -280,10 +277,7 @@ function guest_only() {
 
     if (isset($_SESSION['id'])) {
         if (isset($conn) && !active_session_user($conn)) {
-            reset_session_with_message(
-                'Your account was logged in from another device. Please login again.',
-                'error'
-            );
+            reset_session_with_message('Please login again.', 'error');
             return;
         }
 
@@ -319,28 +313,16 @@ function current_user($conn) {
     return $user;
 }
 
-function ensure_session_token_column($conn) {
-    $columnCheck = $conn->query("SHOW COLUMNS FROM users LIKE 'session_token'");
-    if ($columnCheck && $columnCheck->num_rows > 0) {
-        return true;
-    }
-
-    return (bool) $conn->query("ALTER TABLE users ADD COLUMN session_token VARCHAR(128) NULL AFTER user_status");
-}
-
 function create_login_session($conn, $user) {
-    ensure_session_token_column($conn);
-
     session_regenerate_id(true);
     $userId = (int)($user['user_id'] ?? 0);
-    $sessionToken = bin2hex(random_bytes(32));
 
-    $stmt = $conn->prepare("UPDATE users SET user_status = 'active', session_token = ? WHERE user_id = ?");
+    $stmt = $conn->prepare("UPDATE users SET user_status = 'active' WHERE user_id = ?");
     if (!$stmt) {
         return false;
     }
 
-    $stmt->bind_param("si", $sessionToken, $userId);
+    $stmt->bind_param("i", $userId);
     $ok = $stmt->execute();
     $stmt->close();
 
@@ -351,46 +333,16 @@ function create_login_session($conn, $user) {
     $_SESSION['id'] = $userId;
     $_SESSION['name'] = $user['name'];
     $_SESSION['QuickCare_role'] = $user['role'];
-    $_SESSION['session_token'] = $sessionToken;
+    unset($_SESSION['session_token']);
     return true;
 }
 
 function active_session_user($conn) {
-    $user = current_user($conn);
-    if (!$user) {
-        return null;
-    }
-
-    ensure_session_token_column($conn);
-    $sessionToken = (string)($_SESSION['session_token'] ?? '');
-    $storedToken = (string)($user['session_token'] ?? '');
-    if ($sessionToken === '' || $storedToken === '' || !hash_equals($storedToken, $sessionToken)) {
-        return null;
-    }
-
-    return $user;
+    return current_user($conn);
 }
 
 function clear_current_login_session($conn) {
-    if (!isset($_SESSION['id'])) {
-        return;
-    }
-
-    ensure_session_token_column($conn);
-    $userId = (int)$_SESSION['id'];
-    $sessionToken = (string)($_SESSION['session_token'] ?? '');
-    if ($sessionToken === '') {
-        return;
-    }
-
-    $stmt = $conn->prepare("UPDATE users SET user_status = 'inactive', session_token = NULL WHERE user_id = ? AND session_token = ?");
-    if (!$stmt) {
-        return;
-    }
-
-    $stmt->bind_param("is", $userId, $sessionToken);
-    $stmt->execute();
-    $stmt->close();
+    unset($_SESSION['session_token']);
 }
 
 function update_user_status($conn, $userId, $status) {
