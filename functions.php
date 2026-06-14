@@ -1078,7 +1078,9 @@ function app_start($role, $page, $title = null) {
     ensure_failed_payment_status($conn);
     require_user_role($conn, $role);
     $title = $title ?: ($PAGE_TITLES[$page] ?? 'Dashboard');
-    echo '<body><div id="app" class="view active">';
+    $bodyRole = preg_replace('/[^a-z0-9_-]/i', '-', (string)$role);
+    $bodyPage = preg_replace('/[^a-z0-9_-]/i', '-', (string)$page);
+    echo '<body class="portal-page role-' . e($bodyRole) . ' page-' . e($bodyPage) . '"><div id="app" class="view active">';
     render_sidebar($conn, $role, $page);
     echo '<div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>';
     echo '<div class="main-content"><div class="topbar"><button class="sidebar-toggle" type="button" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false"><span></span><span></span><span></span></button><span class="topbar-title">' . e($title) . '</span><div class="topbar-actions">';
@@ -3409,27 +3411,6 @@ function render_reports() {
     );
     $paymentRows = get_all_payments();
     $completionRate = (int)($summary['total'] ?? 0) > 0 ? round(((int)($summary['completed'] ?? 0) / (int)$summary['total']) * 100) : 0;
-
-    echo '<style>
-    .report-page { display: flex; flex-direction: column; gap: 18px; }
-    .report-tabs { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(100%, 390px); padding: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-    .report-tabs::before { content: ""; position: absolute; top: 6px; bottom: 6px; left: 6px; width: calc((100% - 12px) / 2); background: var(--primary); border-radius: 7px; transition: transform 0.28s ease; }
-    .report-tabs.payments-active::before { transform: translateX(100%); }
-    .report-tab { position: relative; z-index: 1; min-height: 42px; border: 0; background: transparent; color: var(--text-muted); padding: 8px 14px; border-radius: 7px; font-weight: 700; font-size: 0.95rem; line-height: 1.15; text-align: center; white-space: nowrap; cursor: pointer; transition: color 0.2s ease; }
-    .report-tab.active { color: #fff; }
-    .report-panel { display: none; }
-    .report-panel.active { display: block; }
-    .report-hero { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
-    .report-metric { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 18px; box-shadow: var(--shadow); }
-    .report-metric .metric-label { color: var(--text-muted); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-    .report-metric .metric-value { color: var(--primary); font-size: 26px; font-weight: 800; margin-top: 8px; }
-    .report-section-title { font-size: 18px; font-weight: 800; margin-bottom: 12px; }
-    .report-table-wrap { overflow-x: auto; }
-    .report-page .grid-2 { align-items: start; }
-    .report-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    @media (max-width: 900px) { .report-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 640px) { .report-hero { grid-template-columns: 1fr; } .report-tabs { width: 100%; } .report-tab { padding: 8px 10px; font-size: 0.88rem; } }
-    </style>';
 
     echo '<div class="report-page">';
     echo '<div class="toolbar"><div class="report-tabs" role="tablist"><button type="button" class="report-tab active" data-report-tab="appointments">Appointment Report</button><button type="button" class="report-tab" data-report-tab="payments">Payment Report</button></div><div class="report-actions"><select class="filter-select" id="reportPeriod"><option value="monthly" selected>Monthly</option><option value="yearly">Yearly</option></select><select class="filter-select" id="reportMonth">';

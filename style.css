@@ -2711,3 +2711,1413 @@ tbody td { padding: 12px 16px; color: var(--text); }
         display: none;
     }
 }
+
+/* ====== User payment page ====== */
+body.role-user.page-payment .checkout-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+body.role-user.page-payment #remarks {
+    min-height: 120px;
+    resize: none;
+}
+
+body.role-user.page-payment .qr-payment-section {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+}
+
+body.role-user.page-payment .section-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text);
+}
+
+body.role-user.page-payment .section-icon {
+    font-size: 24px;
+}
+
+
+body.role-user.page-payment .step-box {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 20px;
+    margin-bottom: 30px;
+    padding: 20px;
+    background: var(--surface2);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+}
+
+body.role-user.page-payment .step-number {
+    width: 40px;
+    height: 40px;
+    background: var(--primary);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+body.role-user.page-payment .step-content {
+    flex: 1;
+}
+
+body.role-user.page-payment .step-content h3 {
+    margin-bottom: 15px;
+    color: var(--text);
+    font-size: 18px;
+    margin-top: 0;
+}
+
+body.role-user.page-payment .payment-method-tabs {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(100%, 340px);
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+body.role-user.page-payment .payment-method-tabs::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    bottom: 6px;
+    left: 6px;
+    width: calc((100% - 12px) / 2);
+    background: var(--primary);
+    border-radius: 7px;
+    transition: transform 0.28s ease;
+}
+
+body.role-user.page-payment .payment-method-tabs.qr-active::before {
+    transform: translateX(100%);
+}
+
+body.role-user.page-payment .payment-method-tab {
+    position: relative;
+    z-index: 1;
+    min-height: 40px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+body.role-user.page-payment .payment-method-tab.active {
+    color: white;
+}
+
+body.role-user.page-payment #qrStep.payment-fpx-active .qr-stack {
+    display: none;
+}
+
+body.role-user.page-payment #qrStep.payment-fpx-active .qr-container {
+    display: block;
+}
+
+body.role-user.page-payment #qrStep.payment-fpx-active .bank-detail-row:nth-child(2),
+
+
+body.role-user.page-payment #qrStep.payment-fpx-active .bank-detail-row:nth-child(3) {
+    display: none;
+}
+
+body.role-user.page-payment .qr-container {
+    display: flex;
+    gap: 30px;
+    align-items: center;
+    flex-wrap: nowrap;
+}
+
+body.role-user.page-payment .qr-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 232px;
+    flex-shrink: 0;
+}
+
+body.role-user.page-payment .qr-code {
+    background: white;
+    padding: 14px;
+    border-radius: 12px;
+    text-align: center;
+    border: 1px solid var(--border);
+}
+
+body.role-user.page-payment .qr-type-tabs {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 4px;
+    margin-bottom: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+body.role-user.page-payment .qr-type-tabs::before {
+    content: "";
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc((100% - 8px) / 2);
+    background: var(--primary);
+    border-radius: 6px;
+    transition: transform 0.24s ease;
+}
+
+body.role-user.page-payment .qr-type-tabs.bank-active::before {
+    transform: translateX(100%);
+}
+
+body.role-user.page-payment .qr-type-tab {
+    position: relative;
+    z-index: 1;
+    min-height: 30px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+body.role-user.page-payment .qr-type-tab.active {
+    color: white;
+}
+
+body.role-user.page-payment .qr-title {
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+body.role-user.page-payment .qr-code img {
+    width: 200px;
+    height: 200px;
+    display: block;
+}
+
+body.role-user.page-payment .qr-web-link {
+    width: 200px;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    color: var(--primary);
+    font-weight: 700;
+    text-decoration: none;
+    background: var(--surface2);
+}
+
+body.role-user.page-payment .qr-web-link:hover {
+    border-color: var(--primary);
+    background: rgba(124,51,73,0.08);
+}
+
+body.role-user.page-payment .qr-caption {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 10px;
+}
+
+body.role-user.page-payment .payment-details {
+    flex: 1;
+    min-width: 260px;
+}
+
+body.role-user.page-payment .amount-display {
+    font-size: 20px;
+    margin-bottom: 15px;
+    padding: 10px;
+    background: rgba(124,51,73,0.1);
+    border-radius: 8px;
+    text-align: center;
+    color: var(--primary);
+}
+
+body.role-user.page-payment .payment-amount-summary {
+    margin-bottom: 18px;
+}
+
+body.role-user.page-payment .payment-summary-card {
+    margin-bottom: 20px;
+    padding: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 8px 22px rgba(124,51,73,0.07);
+}
+
+body.role-user.page-payment .payment-summary-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+body.role-user.page-payment .payment-summary-label,
+
+
+body.role-user.page-payment .payment-summary-row span,
+
+
+body.role-user.page-payment .payment-summary-total span {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+body.role-user.page-payment .payment-summary-value {
+    margin-top: 4px;
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 700;
+}
+
+body.role-user.page-payment .payment-summary-method {
+    min-width: 92px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(124,51,73,0.1);
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+}
+
+body.role-user.page-payment .payment-summary-row,
+
+
+body.role-user.page-payment .payment-summary-total {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 14px;
+}
+
+body.role-user.page-payment .payment-summary-row strong {
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 700;
+    text-align: right;
+}
+
+body.role-user.page-payment .payment-summary-total {
+    margin-top: 14px;
+    padding: 16px;
+    background: rgba(124,51,73,0.08);
+    border-radius: 10px;
+}
+
+body.role-user.page-payment .payment-summary-total strong {
+    color: var(--primary);
+    font-size: 24px;
+    font-weight: 800;
+}
+
+body.role-user.page-payment .payment-summary-note {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(42,95,143,0.09);
+    color: var(--info);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+body.role-user.page-payment .bank-details {
+    background: var(--surface);
+    padding: 16px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    border: 1px solid var(--border);
+}
+
+body.role-user.page-payment .bank-details-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+body.role-user.page-payment .bank-detail-row {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 12px;
+    align-items: start;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+body.role-user.page-payment .bank-detail-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+body.role-user.page-payment .bank-detail-label {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+body.role-user.page-payment .bank-detail-value {
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+    text-align: right;
+    word-break: break-word;
+}
+
+body.role-user.page-payment .bank-detail-value small {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+body.role-user.page-payment .warning-note {
+    background: #fef3c7;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #92400e;
+}
+
+body.role-user.page-payment .form-group {
+    margin-bottom: 20px;
+}
+
+body.role-user.page-payment .form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: var(--text);
+}
+
+body.role-user.page-payment .form-control {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    background: var(--surface);
+    color: var(--text);
+}
+
+body.role-user.page-payment .form-control:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(124,51,73,0.1);
+}
+
+body.role-user.page-payment .btn-primary {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-weight: 600;
+    width: 100%;
+}
+
+body.role-user.page-payment .btn-primary:hover {
+    background: var(--primary-dark);
+}
+
+body.role-user.page-payment .alert-info {
+    background: #dbeafe;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: center;
+    color: #1e40af;
+}
+
+body.role-user.page-payment .text-muted {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+@media (max-width: 768px) {
+    body.role-user.page-payment .step-box {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    body.role-user.page-payment .qr-container {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    body.role-user.page-payment .qr-stack {
+        width: 100%;
+    }
+
+    body.role-user.page-payment .qr-code img {
+        margin: 0 auto;
+    }
+
+    body.role-user.page-payment .bank-detail-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
+
+    body.role-user.page-payment .bank-detail-value {
+        text-align: left;
+    }
+
+    body.role-user.page-payment .payment-summary-top,
+
+
+    body.role-user.page-payment .payment-summary-row,
+
+
+    body.role-user.page-payment .payment-summary-total {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    body.role-user.page-payment .payment-summary-row strong {
+        text-align: left;
+    }
+}
+
+
+/* ====== Admin payment page ====== */
+body.role-admin.page-payment .admin-payment-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+
+body.role-admin.page-payment .stats-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+body.role-admin.page-payment .stat-box {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+}
+
+body.role-admin.page-payment .stat-icon {
+    width: 50px;
+    height: 50px;
+    background: rgba(124,51,73,0.1);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+}
+
+body.role-admin.page-payment .stat-info {
+    flex: 1;
+}
+
+body.role-admin.page-payment .stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--primary);
+    display: block;
+}
+
+body.role-admin.page-payment .stat-label {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+
+body.role-admin.page-payment .filter-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+body.role-admin.page-payment .payment-filter-select {
+    width: 220px;
+}
+
+body.role-admin.page-payment .tab-btn {
+    padding: 8px 20px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text);
+}
+
+body.role-admin.page-payment .tab-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+body.role-admin.page-payment .tab-btn:hover:not(.active) {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+
+body.role-admin.page-payment .payments-table-container {
+    background: var(--surface);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+}
+
+body.role-admin.page-payment .admin-payment-container .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+body.role-admin.page-payment .payments-table {
+    width: 100%;
+    min-width: 860px;
+    border-collapse: collapse;
+    font-size: 14px;
+    table-layout: fixed;
+}
+
+body.role-admin.page-payment .payment-col-date {
+    width: 12%;
+}
+
+body.role-admin.page-payment .payment-col-reference {
+    width: 18%;
+}
+
+body.role-admin.page-payment .payment-col-patient {
+    width: 16%;
+}
+
+body.role-admin.page-payment .payment-col-appointment {
+    width: 14%;
+}
+
+body.role-admin.page-payment .payment-col-amount {
+    width: 10%;
+}
+
+body.role-admin.page-payment .payment-col-status {
+    width: 11%;
+}
+
+body.role-admin.page-payment .payment-col-proof {
+    width: 8%;
+}
+
+body.role-admin.page-payment .payment-col-actions {
+    width: 90px;
+}
+
+body.role-admin.page-payment .payments-table th,
+
+
+body.role-admin.page-payment .payments-table td {
+    padding: 12px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    box-sizing: border-box;
+    overflow-wrap: break-word;
+    word-break: normal;
+}
+
+body.role-admin.page-payment .payments-table th {
+    background: var(--surface2);
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.25;
+    white-space: nowrap;
+}
+
+body.role-admin.page-payment .payments-table td {
+    vertical-align: middle;
+}
+
+body.role-admin.page-payment .payment-date-day,
+
+
+body.role-admin.page-payment .payment-date-time {
+    display: block;
+}
+
+body.role-admin.page-payment .payment-date-time {
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+body.role-admin.page-payment .payments-table th:nth-child(5),
+
+
+body.role-admin.page-payment .payments-table td:nth-child(5),
+
+
+body.role-admin.page-payment .payments-table th:nth-child(6),
+
+
+body.role-admin.page-payment .payments-table td:nth-child(6),
+
+
+body.role-admin.page-payment .payments-table th:nth-child(7),
+
+
+body.role-admin.page-payment .payments-table td:nth-child(7),
+
+
+body.role-admin.page-payment .payments-table th:nth-child(8),
+
+
+body.role-admin.page-payment .payments-table td:nth-child(8) {
+    white-space: nowrap;
+}
+
+body.role-admin.page-payment .payments-table td:nth-child(2),
+
+
+body.role-admin.page-payment .payments-table td:nth-child(3),
+
+
+body.role-admin.page-payment .payments-table td:nth-child(4) {
+    overflow-wrap: anywhere;
+}
+
+body.role-admin.page-payment .payments-table tr:hover {
+    background: var(--surface2);
+}
+
+
+body.role-admin.page-payment .btn-view,
+
+
+
+body.role-admin.page-payment .btn-view-details {
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    border: none;
+    transition: background 0.15s, color 0.15s;
+}
+
+body.role-admin.page-payment .btn-view {
+    background: var(--primary);
+    color: white;
+}
+
+body.role-admin.page-payment .btn-view:hover {
+    background: var(--primary-dark);
+}
+
+body.role-admin.page-payment .btn-view-details {
+    background: var(--teal);
+    color: white;
+}
+
+body.role-admin.page-payment .btn-view-details:hover {
+    background: rgba(42,127,127,0.85);
+}
+
+body.role-admin.page-payment .btn-approve {
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    border: none;
+    background: var(--success);
+    color: white;
+}
+
+body.role-admin.page-payment .btn-approve:hover {
+    background: #1e6b4a;
+}
+
+body.role-admin.page-payment .btn-reject {
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    border: none;
+    background: var(--danger);
+    color: white;
+}
+
+body.role-admin.page-payment .btn-reject:hover {
+    background: #8a2020;
+}
+
+body.role-admin.page-payment .btn-refund {
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    border: none;
+    background: var(--warning);
+    color: white;
+}
+
+body.role-admin.page-payment .btn-refund:hover {
+    background: #a16207;
+}
+
+body.role-admin.page-payment .btn-refund-confirm {
+    background: var(--warning);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+body.role-admin.page-payment .btn-refund-confirm:hover {
+    background: #a16207;
+}
+
+body.role-admin.page-payment .btn-outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text);
+}
+
+body.role-admin.page-payment .btn-outline:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+body.role-admin.page-payment .btn-danger {
+    background: var(--danger);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+body.role-admin.page-payment .btn-danger:hover {
+    background: #8a2020;
+}
+
+body.role-admin.page-payment .text-muted {
+    color: var(--text-muted);
+}
+
+body.role-admin.page-payment .actions-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    white-space: normal;
+}
+
+body.role-admin.page-payment .actions-cell .btn-approve,
+
+
+body.role-admin.page-payment .actions-cell .btn-reject,
+
+
+body.role-admin.page-payment .actions-cell .btn-view-details {
+    width: 76px;
+    min-height: 28px;
+    padding-left: 6px;
+    padding-right: 6px;
+    text-align: center;
+}
+
+
+body.role-admin.page-payment .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+}
+
+body.role-admin.page-payment .modal-overlay.active {
+    display: flex;
+}
+
+body.role-admin.page-payment .modal {
+    background: var(--surface);
+    border-radius: var(--radius);
+    width: 90%;
+    max-width: 500px;
+}
+
+body.role-admin.page-payment .payment-details-view-modal {
+    max-width: 500px;
+}
+
+body.role-admin.page-payment .payment-details-modal .detail-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+
+body.role-admin.page-payment .payment-details-modal .detail-row:last-child {
+    border-bottom: none;
+}
+
+body.role-admin.page-payment .payment-details-modal .detail-row strong {
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+body.role-admin.page-payment .payment-details-modal .detail-row {
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+body.role-admin.page-payment .payment-details-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+body.role-admin.page-payment .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+body.role-admin.page-payment .modal-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+body.role-admin.page-payment .modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+body.role-admin.page-payment .modal-body {
+    padding: 20px;
+}
+
+body.role-admin.page-payment #receiptViewModal .modal-body {
+    padding-top: 10px;
+}
+
+body.role-admin.page-payment .modal-footer {
+    padding: 15px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+body.role-admin.page-payment .form-control {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    background: var(--surface);
+    color: var(--text);
+}
+
+body.role-admin.page-payment .form-control:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+body.role-admin.page-payment .refund-upload-group {
+    margin-top: 16px;
+}
+
+body.role-admin.page-payment .refund-upload-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+body.role-admin.page-payment .refund-upload-group input[type="file"] {
+    padding: 12px;
+}
+
+body.role-admin.page-payment .refund-upload-help {
+    margin-top: 8px;
+}
+
+body.role-admin.page-payment .refund-reason-box {
+    margin: 12px 0 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface2);
+    color: var(--text);
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+
+body.role-admin.page-payment .receipt-refund-reason {
+    margin-bottom: 0;
+    text-align: left;
+}
+
+body.role-admin.page-payment .payment-method-proof {
+    display: none;
+    width: fit-content;
+    max-width: 520px;
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: rgba(124, 51, 73, 0.1);
+    color: var(--primary);
+    font-size: 16px;
+    font-weight: 700;
+    text-align: left;
+}
+
+body.role-admin.page-payment .receipt-preview-card {
+    min-height: 180px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+body.role-admin.page-payment .receipt-preview-card img {
+    max-width: 100%;
+    max-height: 70vh;
+    border-radius: 8px;
+    object-fit: contain;
+}
+
+body.role-admin.page-payment .receipt-preview-card .btn {
+    width: auto;
+}
+
+body.role-admin.page-payment .file-open-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    width: 100%;
+    min-height: 160px;
+    text-align: center;
+}
+
+body.role-admin.page-payment .file-open-fallback p {
+    margin: 0;
+    color: var(--text-muted);
+}
+
+body.role-admin.page-payment .refund-reason-box:empty {
+    display: none;
+}
+@media (max-width: 768px) {
+    body.role-admin.page-payment .stats-summary {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    body.role-admin.page-payment .payments-table th,
+
+    
+    body.role-admin.page-payment .payments-table td {
+        padding: 7px 5px;
+        font-size: 11px;
+    }
+    
+    body.role-admin.page-payment .actions-cell {
+        gap: 5px;
+    }
+}
+
+
+/* ====== Staff payment page ====== */
+body.role-staff.page-payment .staff-payment-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+body.role-staff.page-payment .page-header {
+    margin-bottom: 25px;
+}
+
+body.role-staff.page-payment .page-header h1 {
+    font-size: 24px;
+    color: var(--text);
+}
+
+body.role-staff.page-payment .header-icon {
+    font-size: 28px;
+    margin-right: 10px;
+}
+
+body.role-staff.page-payment .filter-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+body.role-staff.page-payment .payment-filter-select {
+    width: 220px;
+}
+
+body.role-staff.page-payment .tab-btn {
+    padding: 8px 20px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    color: var(--text);
+}
+
+body.role-staff.page-payment .tab-btn.active {
+    background: rgba(124,51,73,0.15);
+    color: var(--primary);
+    border-color: rgba(124,51,73,0.15);
+}
+
+body.role-staff.page-payment .tab-btn:hover:not(.active) {
+    background: var(--surface2);
+    border-color: var(--border);
+    color: var(--text);
+}
+
+body.role-staff.page-payment .tab-btn:active,
+
+
+body.role-staff.page-payment .btn-view:active,
+
+
+body.role-staff.page-payment .btn-view-details:active {
+    background: rgba(124,51,73,0.15);
+}
+
+body.role-staff.page-payment .payments-table-container {
+    background: var(--surface);
+    border-radius: var(--radius);
+    overflow-x: auto;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+}
+
+body.role-staff.page-payment .payments-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+body.role-staff.page-payment .payments-table th,
+
+
+body.role-staff.page-payment .payments-table td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+}
+
+body.role-staff.page-payment .payments-table th {
+    background: var(--surface2);
+    font-weight: 600;
+    color: var(--text);
+}
+
+body.role-staff.page-payment .payments-table tr:hover {
+    background: var(--surface2);
+}
+
+body.role-staff.page-payment .status-badge {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-block;
+}
+
+body.role-staff.page-payment .status-pending,
+
+
+body.role-staff.page-payment .status-verifying {
+    background: rgba(194,122,26,0.12);
+    color: var(--warning);
+}
+
+body.role-staff.page-payment .status-approved {
+    background: rgba(42,127,90,0.12);
+    color: var(--success);
+}
+
+body.role-staff.page-payment .status-rejected {
+    background: rgba(176,48,48,0.12);
+    color: var(--danger);
+}
+
+body.role-staff.page-payment .staff-payment-container .badge-refund-requested,
+
+
+body.role-staff.page-payment .staff-payment-container .badge-refund-rejected {
+    display: inline-block;
+    width: 82px;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.2;
+}
+
+body.role-staff.page-payment .btn-view,
+
+
+body.role-staff.page-payment .btn-view-details {
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    border: none;
+    transition: background 0.15s, color 0.15s;
+}
+
+body.role-staff.page-payment .btn-view {
+    background: var(--primary);
+    color: white;
+}
+
+body.role-staff.page-payment .btn-view:hover {
+    background: rgba(124,51,73,0.85);
+}
+
+body.role-staff.page-payment .btn-view-details {
+    background: var(--teal);
+    color: white;
+}
+
+body.role-staff.page-payment .btn-view-details:hover {
+    background: rgba(42,127,127,0.85);
+}
+
+body.role-staff.page-payment .alert-info {
+    background: #dbeafe;
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: #1e40af;
+    text-align: center;
+    width: 100%;
+}
+
+body.role-staff.page-payment .modal {
+    max-width: 500px;
+    background: var(--surface);
+    border-radius: var(--radius);
+}
+
+body.role-staff.page-payment .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+body.role-staff.page-payment .modal-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+body.role-staff.page-payment .modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+body.role-staff.page-payment .modal-body {
+    padding: 20px;
+}
+
+body.role-staff.page-payment #receiptViewModal .modal-body {
+    padding-top: 10px;
+}
+
+body.role-staff.page-payment .modal-footer {
+    padding: 15px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+}
+
+body.role-staff.page-payment .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+
+body.role-staff.page-payment .detail-row:last-child {
+    border-bottom: none;
+}
+
+body.role-staff.page-payment .detail-label {
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+body.role-staff.page-payment .detail-value {
+    color: var(--text);
+}
+
+body.role-staff.page-payment .receipt-preview-card {
+    min-height: 180px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+body.role-staff.page-payment .receipt-preview-card img {
+    max-width: 100%;
+    max-height: 70vh;
+    border-radius: 8px;
+    object-fit: contain;
+}
+
+body.role-staff.page-payment .receipt-preview-card .btn {
+    width: auto;
+}
+
+body.role-staff.page-payment .file-open-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    width: 100%;
+    min-height: 160px;
+    text-align: center;
+}
+
+body.role-staff.page-payment .file-open-fallback p {
+    margin: 0;
+    color: var(--text-muted);
+}
+@media (max-width: 768px) {
+    body.role-staff.page-payment .payments-table th,
+    body.role-staff.page-payment .payments-table td {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+    
+    body.role-staff.page-payment .filter-tabs {
+        justify-content: center;
+    }
+}
+
+/* ====== Admin reports page ====== */
+body.role-admin.page-reports .report-page { display: flex; flex-direction: column; gap: 18px; }
+body.role-admin.page-reports .report-tabs { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(100%, 390px); padding: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+body.role-admin.page-reports .report-tabs::before { content: ""; position: absolute; top: 6px; bottom: 6px; left: 6px; width: calc((100% - 12px) / 2); background: var(--primary); border-radius: 7px; transition: transform 0.28s ease; }
+body.role-admin.page-reports .report-tabs.payments-active::before { transform: translateX(100%); }
+body.role-admin.page-reports .report-tab { position: relative; z-index: 1; min-height: 42px; border: 0; background: transparent; color: var(--text-muted); padding: 8px 14px; border-radius: 7px; font-weight: 700; font-size: 0.95rem; line-height: 1.15; text-align: center; white-space: nowrap; cursor: pointer; transition: color 0.2s ease; }
+body.role-admin.page-reports .report-tab.active { color: #fff; }
+body.role-admin.page-reports .report-panel { display: none; }
+body.role-admin.page-reports .report-panel.active { display: block; }
+body.role-admin.page-reports .report-hero { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+body.role-admin.page-reports .report-metric { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 18px; box-shadow: var(--shadow); }
+body.role-admin.page-reports .report-metric .metric-label { color: var(--text-muted); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+body.role-admin.page-reports .report-metric .metric-value { color: var(--primary); font-size: 26px; font-weight: 800; margin-top: 8px; }
+body.role-admin.page-reports .report-section-title { font-size: 18px; font-weight: 800; margin-bottom: 12px; }
+body.role-admin.page-reports .report-table-wrap { overflow-x: auto; }
+body.role-admin.page-reports .report-page .grid-2 { align-items: start; }
+body.role-admin.page-reports .report-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+@media (max-width: 900px) {
+    body.role-admin.page-reports .report-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+    body.role-admin.page-reports .report-hero { grid-template-columns: 1fr; }
+    body.role-admin.page-reports .report-tabs { width: 100%; }
+    body.role-admin.page-reports .report-tab { padding: 8px 10px; font-size: 0.88rem; }
+}
