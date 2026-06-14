@@ -58,7 +58,7 @@ $PAGE_TITLES = [
 if (session_status() === PHP_SESSION_NONE) {
     $sessionPath = __DIR__ . DIRECTORY_SEPARATOR . 'sessions';
     if (!is_dir($sessionPath)) {
-        mkdir($sessionPath, 0777, true);
+        mkdir($sessionPath, 0755, true);
     }
     session_save_path($sessionPath);
     session_start();
@@ -75,28 +75,84 @@ function email_exist($conn, $email) {
     return $exists;
 }
 
+function mysql_named_lock($conn, $name, $timeout = 10) {
+    $lockName = substr('QuickCare_' . preg_replace('/[^A-Za-z0-9_.:-]/', '_', (string)$name), 0, 64);
+    $stmt = $conn->prepare("SELECT GET_LOCK(?, ?) AS lock_acquired");
+    if (!$stmt) {
+        return null;
+    }
+
+    $timeout = (int)$timeout;
+    $stmt->bind_param("si", $lockName, $timeout);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if ((int)($row['lock_acquired'] ?? 0) !== 1) {
+        return null;
+    }
+
+    return $lockName;
+}
+
+function mysql_named_unlock($conn, $lockName) {
+    if (!$lockName) {
+        return;
+    }
+
+    $stmt = $conn->prepare("SELECT RELEASE_LOCK(?)");
+    if (!$stmt) {
+        return;
+    }
+
+    $stmt->bind_param("s", $lockName);
+    $stmt->execute();
+    $stmt->close();
+}
+
 //insert user data
 function create_user($conn, $name, $email, $password, $role) {
     $prefix = 'U';
-    $stmt = $conn->prepare("
-        SELECT MAX(CAST(SUBSTRING(user_code, 2) AS UNSIGNED)) AS max_id
-        FROM users
-        WHERE role = 'user'
-    ");
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
-    $next_id = ((int)$row['max_id']) + 1;
-    $user_code = $prefix . str_pad($next_id, 3, '0', STR_PAD_LEFT);
-    $stmt->close();
+    $emailLock = mysql_named_lock($conn, 'email_' . strtolower($email));
+    if (!$emailLock) {
+        return false;
+    }
 
-    $stmt = $conn->prepare(
-        "INSERT INTO users (user_code, name, email, password, role) VALUES (?, ?, ?, ?, ?)"
-    );
-    $stmt->bind_param("sssss", $user_code, $name, $email, $password, $role);
-    $success = $stmt->execute();
-    $stmt->close();
-    return $success;
+    try {
+        $lockName = mysql_named_lock($conn, 'user_code_' . $role);
+        if (!$lockName) {
+            return false;
+        }
+
+        if (email_exist($conn, $email)) {
+            return false;
+        }
+
+        $stmt = $conn->prepare("
+            SELECT MAX(CAST(SUBSTRING(user_code, 2) AS UNSIGNED)) AS max_id
+            FROM users
+            WHERE role = 'user'
+        ");
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
+        $next_id = ((int)$row['max_id']) + 1;
+        $user_code = $prefix . str_pad($next_id, 3, '0', STR_PAD_LEFT);
+        $stmt->close();
+
+        $stmt = $conn->prepare(
+            "INSERT INTO users (user_code, name, email, password, role) VALUES (?, ?, ?, ?, ?)"
+        );
+        $stmt->bind_param("sssss", $user_code, $name, $email, $password, $role);
+        $success = $stmt->execute();
+        $stmt->close();
+        return $success;
+    } finally {
+        if (isset($lockName)) {
+            mysql_named_unlock($conn, $lockName);
+        }
+        mysql_named_unlock($conn, $emailLock);
+    }
 }
 
 //check email exist or not (login - return user data or false)
@@ -1797,20 +1853,19 @@ function mark_toyyibpay_payment_paid($billCode) {
         return false;
     }
 
-    $stmt = $conn->prepare("SELECT * FROM payments WHERE transaction_id = ? LIMIT 1");
-    $stmt->bind_param("s", $billCode);
-    $stmt->execute();
-    $payment = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-
-    if (!$payment) {
-        return false;
-    }
-
-    $wasAlreadyPaid = in_array(strtolower((string)($payment['payment_status'] ?? '')), ['paid', 'approved'], true);
-
     $conn->begin_transaction();
     try {
+        $stmt = $conn->prepare("SELECT * FROM payments WHERE transaction_id = ? LIMIT 1 FOR UPDATE");
+        $stmt->bind_param("s", $billCode);
+        $stmt->execute();
+        $payment = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$payment) {
+            throw new Exception('Payment not found');
+        }
+
+        $wasAlreadyPaid = in_array(strtolower((string)($payment['payment_status'] ?? '')), ['paid', 'approved'], true);
         $receiptNumber = payment_receipt_number($payment);
         $payment['receipt_number'] = $receiptNumber;
 
@@ -4541,12 +4596,12 @@ function get_pending_payments() {
 
 // Generate receipt number
 function generate_receipt_number() {
-    return 'RCPT-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+    return 'RCPT-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(4)));
 }
 
 // Generate payment code
 function generate_payment_code() {
-    return 'PAY-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+    return 'PAY-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(4)));
 }
 
 function payment_receipt_number($payment) {
@@ -4576,50 +4631,83 @@ function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $
     global $conn;
     ensure_payment_method_column($conn);
     ensure_failed_payment_status($conn);
-    
-    // Get appointment details
-    $stmt = $conn->prepare("
-        SELECT a.*, a.doctor_name, a.service_name, a.appointment_date, a.appointment_time
-        FROM appointments a
-        WHERE a.appointment_code = ?
-          AND a.user_id = ?
-    ");
-    $stmt->bind_param("si", $appointment_code, $user_id);
-    $stmt->execute();
-    $appointment = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    
-    if (!$appointment) {
-        return false;
-    }
-    
-    $amount = (float) $appointment['amount'];
-    $payment_code = generate_payment_code();
-    $receipt_number = in_array($payment_status, ['paid', 'approved'], true) ? generate_receipt_number() : null;
-    
-    $remarks = clean_payment_remarks($remarks);
-    $payment_method = trim((string)$payment_method);
 
-    $stmt = $conn->prepare("
-        INSERT INTO payments (payment_code, user_id, appointment_code, receipt_number, amount, 
-                              payment_status, payment_method, transaction_id, receipt_image, remarks, payment_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-    ");
-    $stmt->bind_param("sissdsssss", $payment_code, $user_id, $appointment_code, $receipt_number,
-                      $amount, $payment_status, $payment_method, $transaction_id, $receipt_file, $remarks);
-    
-    $success = $stmt->execute();
-    $stmt->close();
-    
-    if ($success) {
-        // Update appointment payment status to show payment verification is in progress
-        $stmt = $conn->prepare("UPDATE appointments SET payment_status = ? WHERE appointment_code = ?");
-        $stmt->bind_param("ss", $payment_status, $appointment_code);
+    $conn->begin_transaction();
+
+    try {
+        $stmt = $conn->prepare("
+            SELECT a.*, a.doctor_name, a.service_name, a.appointment_date, a.appointment_time
+            FROM appointments a
+            WHERE a.appointment_code = ?
+              AND a.user_id = ?
+              AND a.payment_status IN ('pending', 'rejected', 'failed')
+            FOR UPDATE
+        ");
+        $stmt->bind_param("si", $appointment_code, $user_id);
+        $stmt->execute();
+        $appointment = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$appointment) {
+            throw new Exception('Appointment not found or cannot be paid');
+        }
+
+        $stmt = $conn->prepare("
+            SELECT payment_id
+            FROM payments
+            WHERE appointment_code = ?
+              AND payment_status NOT IN ('failed', 'rejected')
+            LIMIT 1
+            FOR UPDATE
+        ");
+        $stmt->bind_param("s", $appointment_code);
+        $stmt->execute();
+        $existingPayment = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($existingPayment) {
+            throw new Exception('Payment already submitted');
+        }
+
+        $amount = (float) $appointment['amount'];
+        $payment_code = generate_payment_code();
+        $receipt_number = in_array($payment_status, ['paid', 'approved'], true) ? generate_receipt_number() : null;
+
+        $remarks = clean_payment_remarks($remarks);
+        $payment_method = trim((string)$payment_method);
+
+        $stmt = $conn->prepare("
+            INSERT INTO payments (payment_code, user_id, appointment_code, receipt_number, amount,
+                                  payment_status, payment_method, transaction_id, receipt_image, remarks, payment_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        ");
+        $stmt->bind_param("sissdsssss", $payment_code, $user_id, $appointment_code, $receipt_number,
+                          $amount, $payment_status, $payment_method, $transaction_id, $receipt_file, $remarks);
         $stmt->execute();
         $stmt->close();
+
+        $stmt = $conn->prepare("
+            UPDATE appointments
+            SET payment_status = ?
+            WHERE appointment_code = ?
+              AND user_id = ?
+              AND payment_status IN ('pending', 'rejected', 'failed')
+        ");
+        $stmt->bind_param("ssi", $payment_status, $appointment_code, $user_id);
+        $stmt->execute();
+        $updated = $stmt->affected_rows;
+        $stmt->close();
+
+        if ($updated <= 0) {
+            throw new Exception('Appointment payment status changed');
+        }
+
+        $conn->commit();
+        return true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        return false;
     }
-    
-    return $success;
 }
 
 // Approve payment (admin)
@@ -4630,7 +4718,7 @@ function approve_payment($payment_id, $admin_id) {
     
     try {
         // Get payment details
-        $stmt = $conn->prepare("SELECT * FROM payments WHERE payment_id = ?");
+        $stmt = $conn->prepare("SELECT * FROM payments WHERE payment_id = ? FOR UPDATE");
         $stmt->bind_param("i", $payment_id);
         $stmt->execute();
         $payment = $stmt->get_result()->fetch_assoc();
@@ -4638,6 +4726,10 @@ function approve_payment($payment_id, $admin_id) {
         
         if (!$payment) {
             throw new Exception('Payment not found');
+        }
+
+        if (!in_array($payment['payment_status'] ?? '', ['verifying', 'pending'], true)) {
+            throw new Exception('Payment already handled');
         }
         
         $receiptNumber = payment_receipt_number($payment);
@@ -4648,10 +4740,16 @@ function approve_payment($payment_id, $admin_id) {
             UPDATE payments 
             SET payment_status = 'paid', receipt_number = ?, approved_by = ?, approved_date = NOW()
             WHERE payment_id = ?
+              AND payment_status IN ('verifying', 'pending')
         ");
         $stmt->bind_param("sii", $receiptNumber, $admin_id, $payment_id);
         $stmt->execute();
+        $updated = $stmt->affected_rows;
         $stmt->close();
+
+        if ($updated <= 0) {
+            throw new Exception('Payment already handled');
+        }
         
         // Update appointment payment status to paid
         if ($payment['appointment_code']) {
@@ -4687,37 +4785,57 @@ function approve_payment($payment_id, $admin_id) {
 // Reject payment (admin)
 function reject_payment($payment_id, $admin_id, $reason) {
     global $conn;
-    
-    $stmt = $conn->prepare("
-        UPDATE payments 
-        SET payment_status = 'rejected', approved_by = ?, approved_date = NOW(), remarks = CONCAT(remarks, '\nRejected: ', ?)
-        WHERE payment_id = ?
-    ");
-    $stmt->bind_param("isi", $admin_id, $reason, $payment_id);
-    $success = $stmt->execute();
-    $stmt->close();
-    
-    if ($success) {
-        // Get payment details
-        $stmt = $conn->prepare("SELECT * FROM payments WHERE payment_id = ?");
+
+    $conn->begin_transaction();
+
+    try {
+        $stmt = $conn->prepare("SELECT * FROM payments WHERE payment_id = ? FOR UPDATE");
         $stmt->bind_param("i", $payment_id);
         $stmt->execute();
         $payment = $stmt->get_result()->fetch_assoc();
         $stmt->close();
-        
+
+        if (!$payment) {
+            throw new Exception('Payment not found');
+        }
+
+        if (!in_array($payment['payment_status'] ?? '', ['verifying', 'pending'], true)) {
+            throw new Exception('Payment already handled');
+        }
+
+        $stmt = $conn->prepare("
+            UPDATE payments
+            SET payment_status = 'rejected', approved_by = ?, approved_date = NOW(), remarks = CONCAT(COALESCE(remarks, ''), '\nRejected: ', ?)
+            WHERE payment_id = ?
+              AND payment_status IN ('verifying', 'pending')
+        ");
+        $stmt->bind_param("isi", $admin_id, $reason, $payment_id);
+        $stmt->execute();
+        $updated = $stmt->affected_rows;
+        $stmt->close();
+
+        if ($updated <= 0) {
+            throw new Exception('Payment already handled');
+        }
+
         // Update appointment payment status so the patient can retry
-        if ($payment && $payment['appointment_code']) {
+        if ($payment['appointment_code']) {
             $stmt = $conn->prepare("UPDATE appointments SET payment_status = 'rejected' WHERE appointment_code = ?");
             $stmt->bind_param("s", $payment['appointment_code']);
             $stmt->execute();
             $stmt->close();
         }
-        
+
+        $conn->commit();
+
         // Send email notification
         send_payment_rejected_email($payment['user_id'], $payment, $reason);
+
+        return true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        return false;
     }
-    
-    return $success;
 }
 
 // Refund payment (admin)

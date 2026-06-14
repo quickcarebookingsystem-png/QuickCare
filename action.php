@@ -58,6 +58,11 @@ if ($action === 'register') {
             redirect_to('login.php');
             exit();
         }
+
+        $_SESSION['QuickCare_message'] = "Unable to create account. The email may already be registered.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        redirect_to('register.php');
+        exit();
     }
 }
 
@@ -406,7 +411,7 @@ if ($action === 'submit_payment') {
         $upload_dir = __DIR__ . '/uploads/receipts/';
         
         if (!is_dir($upload_dir)) {
-            mkdir($upload_dir, 0777, true);
+            mkdir($upload_dir, 0755, true);
         }
         
         if ($_FILES['receipt']['size'] > 2 * 1024 * 1024) {
@@ -426,7 +431,7 @@ if ($action === 'submit_payment') {
             exit;
         }
 
-        $receipt_image = 'receipt_' . time() . '_' . rand(1000, 9999) . '.' . $allowed_types[$mime_type];
+        $receipt_image = 'receipt_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $allowed_types[$mime_type];
         $upload_path = $upload_dir . $receipt_image;
         
         if (!move_uploaded_file($_FILES['receipt']['tmp_name'], $upload_path)) {
@@ -439,7 +444,7 @@ if ($action === 'submit_payment') {
     }
     
     // Generate random transaction ID for internal use
-    $transaction_id = 'TXN' . time() . rand(1000, 9999);
+    $transaction_id = 'TXN' . time() . strtoupper(bin2hex(random_bytes(4)));
 
     // Explicitly set uploaded payment status
     $payment_status = 'verifying';
@@ -692,7 +697,7 @@ if ($action === 'save_profile' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset
 
         $uploadDir = __DIR__ . '/uploads/avatars/';
         if (!is_dir($uploadDir)) {
-            mkdir($uploadDir, 0777, true);
+            mkdir($uploadDir, 0755, true);
         }
 
         $profileImage = 'avatar_' . $id . '_' . time() . '.' . $allowedTypes[$mimeType];
@@ -753,28 +758,55 @@ if ($action === 'save_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect_to($back);
     }
 
-    $stmt = $conn->prepare("
-        SELECT MAX(CAST(SUBSTRING(user_code, 2) AS UNSIGNED)) AS max_id
-        FROM users
-        WHERE role = ?
-    ");
-    $stmt->bind_param("s", $role);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
+    $staffEmailLock = mysql_named_lock($conn, 'email_' . strtolower($email));
+    if (!$staffEmailLock) {
+        $_SESSION['QuickCare_message'] = 'Unable to create staff right now. Please try again.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
 
-    $nextId = ((int)($row['max_id'] ?? 0)) + 1;
-    $userCode = 'S' . str_pad($nextId, 3, '0', STR_PAD_LEFT);
-    $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-    $userStatus = 'inactive';
+    try {
+        $staffCodeLock = mysql_named_lock($conn, 'user_code_' . $role);
+        if (!$staffCodeLock) {
+            $_SESSION['QuickCare_message'] = 'Unable to create staff right now. Please try again.';
+            $_SESSION['QuickCare_message_type'] = 'error';
+            redirect_to($back);
+        }
 
-    $stmt = $conn->prepare("
-        INSERT INTO users (user_code, name, email, password, role, phone_number, user_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ");
-    $stmt->bind_param("sssssss", $userCode, $name, $email, $hashedPassword, $role, $phoneNumber, $userStatus);
-    $stmt->execute();
-    $stmt->close();
+        if (email_exist($conn, $email)) {
+            $_SESSION['QuickCare_message'] = 'Email already registered.';
+            $_SESSION['QuickCare_message_type'] = 'error';
+            redirect_to($back);
+        }
+
+        $stmt = $conn->prepare("
+            SELECT MAX(CAST(SUBSTRING(user_code, 2) AS UNSIGNED)) AS max_id
+            FROM users
+            WHERE role = ?
+        ");
+        $stmt->bind_param("s", $role);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        $nextId = ((int)($row['max_id'] ?? 0)) + 1;
+        $userCode = 'S' . str_pad($nextId, 3, '0', STR_PAD_LEFT);
+        $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+        $userStatus = 'inactive';
+
+        $stmt = $conn->prepare("
+            INSERT INTO users (user_code, name, email, password, role, phone_number, user_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->bind_param("sssssss", $userCode, $name, $email, $hashedPassword, $role, $phoneNumber, $userStatus);
+        $stmt->execute();
+        $stmt->close();
+    } finally {
+        if (isset($staffCodeLock)) {
+            mysql_named_unlock($conn, $staffCodeLock);
+        }
+        mysql_named_unlock($conn, $staffEmailLock);
+    }
 }
 
 if ($action === 'update_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -960,72 +992,102 @@ if ($action === 'book_appointment' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
     }
 
-    $stmt = $conn->prepare("
-        SELECT COUNT(*) AS total
-        FROM appointments
-        WHERE doctor_name = ?
-          AND appointment_date = ?
-          AND appointment_time = ?
-          AND appointment_status NOT IN ('rejected', 'cancelled')
-    ");
-    $stmt->bind_param("sss", $doctor, $date, $appointmentTime);
-    $stmt->execute();
-    $bookingRow = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-
-    if ((int)($bookingRow['total'] ?? 0) > 0) {
-        $_SESSION['QuickCare_message'] = "Selected time slot is already booked.";
+    $bookingLock = mysql_named_lock($conn, 'appointment_booking');
+    if (!$bookingLock) {
+        $_SESSION['QuickCare_message'] = "The booking system is busy. Please try again.";
+        $_SESSION['QuickCare_message_type'] = "error";
         redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
     }
 
-    $amount = 0.0;
-    $stmt = $conn->prepare("SELECT service_price FROM services WHERE service_name = ?");
-    foreach ($selectedServices as $serviceName) {
-        $stmt->bind_param("s", $serviceName);
+    try {
+        $conn->begin_transaction();
+
+        $stmt = $conn->prepare("
+            SELECT appointment_id
+            FROM appointments
+            WHERE doctor_name = ?
+              AND appointment_date = ?
+              AND appointment_time = ?
+              AND appointment_status NOT IN ('rejected', 'cancelled')
+            LIMIT 1
+            FOR UPDATE
+        ");
+        $stmt->bind_param("sss", $doctor, $date, $appointmentTime);
         $stmt->execute();
-        $serviceRow = $stmt->get_result()->fetch_assoc();
-        $amount += (float) ($serviceRow['service_price'] ?? 0);
-    }
-    $stmt->close();
+        $existingBooking = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
 
-    $service = implode(', ', $selectedServices);
+        if ($existingBooking) {
+            throw new RuntimeException('slot_taken');
+        }
 
-    $result = $conn->query("
-        SELECT MAX(CAST(SUBSTRING(appointment_code, 5) AS UNSIGNED)) AS max_code
-        FROM appointments
-        WHERE appointment_code LIKE 'APT-%'
-    ");
-    $row = $result ? $result->fetch_assoc() : null;
-    $nextCode = ((int) ($row['max_code'] ?? 0)) + 1;
-    $appointmentCode = 'APT-' . str_pad($nextCode, 4, '0', STR_PAD_LEFT);
-    $name = $user['name'] ?? ($_SESSION['name'] ?? '');
-    $userId = (int) ($user['user_id'] ?? ($_SESSION['id'] ?? 0));
-    $appointment_status = 'confirmed';
-    $payment_status = 'pending';
+        $amount = 0.0;
+        $stmt = $conn->prepare("SELECT service_price FROM services WHERE service_name = ?");
+        foreach ($selectedServices as $serviceName) {
+            $stmt->bind_param("s", $serviceName);
+            $stmt->execute();
+            $serviceRow = $stmt->get_result()->fetch_assoc();
+            $amount += (float) ($serviceRow['service_price'] ?? 0);
+        }
+        $stmt->close();
 
-    $hasUserIdColumn = false;
-    $columnCheck = $conn->query("SHOW COLUMNS FROM appointments LIKE 'user_id'");
-    if ($columnCheck && $columnCheck->num_rows > 0) {
-        $hasUserIdColumn = true;
-    }
+        $service = implode(', ', $selectedServices);
 
-    if ($hasUserIdColumn) {
-        $stmt = $conn->prepare("
-            INSERT INTO appointments (appointment_code, user_id, name, doctor_name, service_name, appointment_date, appointment_time, appointment_status, payment_status, amount, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        $result = $conn->query("
+            SELECT MAX(CAST(SUBSTRING(appointment_code, 5) AS UNSIGNED)) AS max_code
+            FROM appointments
+            WHERE appointment_code LIKE 'APT-%'
         ");
-        $stmt->bind_param("sisssssssds", $appointmentCode, $userId, $name, $doctor, $service, $date, $time, $appointment_status, $payment_status, $amount, $notes);
-    } else {
-        $stmt = $conn->prepare("
-            INSERT INTO appointments (appointment_code, name, doctor_name, service_name, appointment_date, appointment_time, appointment_status, payment_status, amount, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        $stmt->bind_param("ssssssssds", $appointmentCode, $name, $doctor, $service, $date, $time, $appointment_status, $payment_status, $amount, $notes);
-    }
-    $stmt->execute();
-    $stmt->close();
+        $row = $result ? $result->fetch_assoc() : null;
+        $nextCode = ((int) ($row['max_code'] ?? 0)) + 1;
+        $appointmentCode = 'APT-' . str_pad($nextCode, 4, '0', STR_PAD_LEFT);
+        $name = $user['name'] ?? ($_SESSION['name'] ?? '');
+        $userId = (int) ($user['user_id'] ?? ($_SESSION['id'] ?? 0));
+        $appointment_status = 'confirmed';
+        $payment_status = 'pending';
 
-    $_SESSION['QuickCare_message'] = "Appointment booked successfully.";
+        $hasUserIdColumn = false;
+        $columnCheck = $conn->query("SHOW COLUMNS FROM appointments LIKE 'user_id'");
+        if ($columnCheck && $columnCheck->num_rows > 0) {
+            $hasUserIdColumn = true;
+        }
+
+        if ($hasUserIdColumn) {
+            $stmt = $conn->prepare("
+                INSERT INTO appointments (appointment_code, user_id, name, doctor_name, service_name, appointment_date, appointment_time, appointment_status, payment_status, amount, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->bind_param("sisssssssds", $appointmentCode, $userId, $name, $doctor, $service, $date, $appointmentTime, $appointment_status, $payment_status, $amount, $notes);
+        } else {
+            $stmt = $conn->prepare("
+                INSERT INTO appointments (appointment_code, name, doctor_name, service_name, appointment_date, appointment_time, appointment_status, payment_status, amount, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->bind_param("ssssssssds", $appointmentCode, $name, $doctor, $service, $date, $appointmentTime, $appointment_status, $payment_status, $amount, $notes);
+        }
+        $stmt->execute();
+        $stmt->close();
+
+        $conn->commit();
+        $_SESSION['QuickCare_message'] = "Appointment booked successfully.";
+        $_SESSION['QuickCare_message_type'] = "success";
+    } catch (RuntimeException $e) {
+        $conn->rollback();
+        $_SESSION['QuickCare_message'] = $e->getMessage() === 'slot_taken'
+            ? "Selected time slot is already booked."
+            : "Unable to book appointment. Please try again.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        mysql_named_unlock($conn, $bookingLock);
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    } catch (Exception $e) {
+        $conn->rollback();
+        $_SESSION['QuickCare_message'] = "Unable to book appointment. Please try again.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        mysql_named_unlock($conn, $bookingLock);
+        redirect_to(page_url('book', $_SESSION['QuickCare_role'] ?? 'user'));
+    }
+
+    mysql_named_unlock($conn, $bookingLock);
     redirect_to(page_url('appointments', $_SESSION['QuickCare_role'] ?? 'user'));
 }
 
@@ -1564,10 +1626,10 @@ if ($action === 'refund_payment') {
 
     $upload_dir = __DIR__ . '/uploads/receipts/';
     if (!is_dir($upload_dir)) {
-        mkdir($upload_dir, 0777, true);
+        mkdir($upload_dir, 0755, true);
     }
 
-    $refund_receipt = 'refund_receipt_' . time() . '_' . rand(1000, 9999) . '.' . $allowed_types[$mime_type];
+    $refund_receipt = 'refund_receipt_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $allowed_types[$mime_type];
     if (!move_uploaded_file($_FILES['refund_receipt']['tmp_name'], $upload_dir . $refund_receipt)) {
         echo json_encode(['success' => false, 'message' => 'Failed to upload refund receipt']);
         exit;
@@ -1825,10 +1887,10 @@ if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $uploadDir = __DIR__ . '/uploads/doctors/';
             if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0777, true);
+                mkdir($uploadDir, 0755, true);
             }
 
-            $doctorImage = 'doctor_' . time() . '_' . rand(1000, 9999) . '.' . $allowedTypes[$mimeType];
+            $doctorImage = 'doctor_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $allowedTypes[$mimeType];
             if (!move_uploaded_file($_FILES['doctor_image']['tmp_name'], $uploadDir . $doctorImage)) {
                 $_SESSION['QuickCare_message'] = 'Failed to upload doctor photo.';
                 $_SESSION['QuickCare_message_type'] = 'error';
@@ -1836,51 +1898,62 @@ if ($action === 'save_doctor' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        if ($id > 0) {
-            if ($doctorImage !== null) {
-                $stmt = $conn->prepare("UPDATE doctors SET doctor_image = ?, doctor_name = ?, doctor_specialist = ? WHERE doctor_id = ?");
-                $stmt->bind_param("sssi", $doctorImage, $name, $specialization, $id);
+        $conn->begin_transaction();
+
+        try {
+            if ($id > 0) {
+                if ($doctorImage !== null) {
+                    $stmt = $conn->prepare("UPDATE doctors SET doctor_image = ?, doctor_name = ?, doctor_specialist = ? WHERE doctor_id = ?");
+                    $stmt->bind_param("sssi", $doctorImage, $name, $specialization, $id);
+                } else {
+                    $stmt = $conn->prepare("UPDATE doctors SET doctor_name = ?, doctor_specialist = ? WHERE doctor_id = ?");
+                    $stmt->bind_param("ssi", $name, $specialization, $id);
+                }
+                $stmt->execute();
+                $stmt->close();
+                $doctor_id = $id;
+
+                $stmtClear = $conn->prepare("DELETE FROM doctor_schedule WHERE doctor_id = ?");
+                $stmtClear->bind_param("i", $id);
+                $stmtClear->execute();
+                $stmtClear->close();
             } else {
-                $stmt = $conn->prepare("UPDATE doctors SET doctor_name = ?, doctor_specialist = ? WHERE doctor_id = ?");
-                $stmt->bind_param("ssi", $name, $specialization, $id);
+                $stmt = $conn->prepare("INSERT INTO doctors (doctor_image, doctor_name, doctor_specialist) VALUES (?, ?, ?)");
+                $stmt->bind_param("sss", $doctorImage, $name, $specialization);
+                $stmt->execute();
+                $doctor_id = $conn->insert_id;
+                $stmt->close();
             }
-            $stmt->execute();
-            $stmt->close();
-            $doctor_id = $id;
 
-            $stmtClear = $conn->prepare("DELETE FROM doctor_schedule WHERE doctor_id = ?");
-            $stmtClear->bind_param("i", $id);
-            $stmtClear->execute();
-            $stmtClear->close();
-        } else {
-            $stmt = $conn->prepare("INSERT INTO doctors (doctor_image, doctor_name, doctor_specialist) VALUES (?, ?, ?)");
-            $stmt->bind_param("sss", $doctorImage, $name, $specialization);
-            $stmt->execute();
-            $doctor_id = $conn->insert_id;
-            $stmt->close();
-        }
+            $stmtClearServices = $conn->prepare("DELETE FROM doctor_services WHERE doctor_id = ?");
+            $stmtClearServices->bind_param("i", $doctor_id);
+            $stmtClearServices->execute();
+            $stmtClearServices->close();
 
-        $stmtClearServices = $conn->prepare("DELETE FROM doctor_services WHERE doctor_id = ?");
-        $stmtClearServices->bind_param("i", $doctor_id);
-        $stmtClearServices->execute();
-        $stmtClearServices->close();
-
-        if (!empty($serviceIds)) {
-            $stmtDoctorService = $conn->prepare("INSERT INTO doctor_services (doctor_id, service_id) VALUES (?, ?)");
-            foreach ($serviceIds as $serviceId) {
-                $stmtDoctorService->bind_param("ii", $doctor_id, $serviceId);
-                $stmtDoctorService->execute();
+            if (!empty($serviceIds)) {
+                $stmtDoctorService = $conn->prepare("INSERT INTO doctor_services (doctor_id, service_id) VALUES (?, ?)");
+                foreach ($serviceIds as $serviceId) {
+                    $stmtDoctorService->bind_param("ii", $doctor_id, $serviceId);
+                    $stmtDoctorService->execute();
+                }
+                $stmtDoctorService->close();
             }
-            $stmtDoctorService->close();
-        }
 
-        if ($doctor_id > 0 && !empty($doctorSchedules)) {
-            $stmtDays = $conn->prepare("INSERT INTO doctor_schedule (doctor_id, available_day, start_time, end_time, break_start_time, break_end_time) VALUES (?, ?, ?, ?, ?, ?)");
-            foreach ($doctorSchedules as [$day, $startTime, $endTime, $breakStartTime, $breakEndTime]) {
-                $stmtDays->bind_param("isssss", $doctor_id, $day, $startTime, $endTime, $breakStartTime, $breakEndTime);
-                $stmtDays->execute();
+            if ($doctor_id > 0 && !empty($doctorSchedules)) {
+                $stmtDays = $conn->prepare("INSERT INTO doctor_schedule (doctor_id, available_day, start_time, end_time, break_start_time, break_end_time) VALUES (?, ?, ?, ?, ?, ?)");
+                foreach ($doctorSchedules as [$day, $startTime, $endTime, $breakStartTime, $breakEndTime]) {
+                    $stmtDays->bind_param("isssss", $doctor_id, $day, $startTime, $endTime, $breakStartTime, $breakEndTime);
+                    $stmtDays->execute();
+                }
+                $stmtDays->close();
             }
-            $stmtDays->close();
+
+            $conn->commit();
+        } catch (Exception $e) {
+            $conn->rollback();
+            $_SESSION['QuickCare_message'] = 'Unable to save doctor. Please try again.';
+            $_SESSION['QuickCare_message_type'] = 'error';
+            redirect_to($_SERVER['HTTP_REFERER'] ?? page_url('doctors', 'admin'));
         }
     }
 }
