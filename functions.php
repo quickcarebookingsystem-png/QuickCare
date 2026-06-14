@@ -247,6 +247,12 @@ function reset_session_with_message($message, $type = 'error') {
     $_SESSION['QuickCare_message_type'] = $type;
 }
 
+function clear_local_session() {
+    session_unset();
+    session_destroy();
+    session_start();
+}
+
 function current_role($conn) {
     $user = current_user($conn);
     if (!$user) {
@@ -285,7 +291,7 @@ function guest_only() {
 
     if (isset($_SESSION['id'])) {
         if (isset($conn) && !active_session_user($conn)) {
-            reset_session_with_message('Please login again.', 'error');
+            clear_local_session();
             return;
         }
 
