@@ -13,6 +13,9 @@ $payments = get_user_payment_history($user_id);
         <h1>Payment History</h1>
         <p>View all your past payments and receipts</p>
     </div>
+    <?php if (($_GET['refund_requested'] ?? '') === '1'): ?>
+        <div class="toast flash-message show success payment-history-flash-message">Refund request submitted. Please wait for admin approval.</div>
+    <?php endif; ?>
 
     <?php if (empty($payments)): ?>
         <div class="empty-state">

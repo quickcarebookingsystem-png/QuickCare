@@ -140,10 +140,11 @@ function create_user($conn, $name, $email, $password, $role) {
         $user_code = $prefix . str_pad($next_id, 3, '0', STR_PAD_LEFT);
         $stmt->close();
 
+        $userStatus = 'inactive';
         $stmt = $conn->prepare(
-            "INSERT INTO users (user_code, name, email, password, role) VALUES (?, ?, ?, ?, ?)"
+            "INSERT INTO users (user_code, name, email, password, role, user_status) VALUES (?, ?, ?, ?, ?, ?)"
         );
-        $stmt->bind_param("sssss", $user_code, $name, $email, $password, $role);
+        $stmt->bind_param("ssssss", $user_code, $name, $email, $password, $role, $userStatus);
         $success = $stmt->execute();
         $stmt->close();
         return $success;
@@ -153,6 +154,13 @@ function create_user($conn, $name, $email, $password, $role) {
         }
         mysql_named_unlock($conn, $emailLock);
     }
+}
+
+function password_meets_criteria($password) {
+    return strlen((string)$password) >= 8
+        && preg_match('/[0-9]/', (string)$password)
+        && preg_match('/[A-Z]/', (string)$password)
+        && preg_match('/[^A-Za-z0-9]/', (string)$password);
 }
 
 //check email exist or not (login - return user data or false)
@@ -313,11 +321,31 @@ function current_user($conn) {
     return $user;
 }
 
+function ensure_user_last_seen_column($conn) {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $result = $conn->query("SHOW COLUMNS FROM users LIKE 'last_seen'");
+    if ($result && $result->num_rows > 0) {
+        $result->close();
+        return;
+    }
+    if ($result) {
+        $result->close();
+    }
+
+    $conn->query("ALTER TABLE users ADD COLUMN last_seen DATETIME NULL AFTER user_status");
+}
+
 function create_login_session($conn, $user) {
     session_regenerate_id(true);
     $userId = (int)($user['user_id'] ?? 0);
+    ensure_user_last_seen_column($conn);
 
-    $stmt = $conn->prepare("UPDATE users SET user_status = 'active' WHERE user_id = ?");
+    $stmt = $conn->prepare("UPDATE users SET user_status = 'active', last_seen = NOW() WHERE user_id = ?");
     if (!$stmt) {
         return false;
     }
@@ -338,10 +366,39 @@ function create_login_session($conn, $user) {
 }
 
 function active_session_user($conn) {
-    return current_user($conn);
+    ensure_user_last_seen_column($conn);
+    $user = current_user($conn);
+    if (!$user) {
+        return null;
+    }
+
+    if (strtolower((string)($user['user_status'] ?? 'inactive')) !== 'active') {
+        return null;
+    }
+
+    $lastSeen = strtotime((string)($user['last_seen'] ?? ''));
+    if ($lastSeen > 0 && $lastSeen < strtotime('-30 minutes')) {
+        update_user_status($conn, (int)$user['user_id'], 'inactive');
+        return null;
+    }
+
+    $userId = (int)$user['user_id'];
+    $stmt = $conn->prepare("UPDATE users SET last_seen = NOW() WHERE user_id = ?");
+    if ($stmt) {
+        $stmt->bind_param("i", $userId);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    return $user;
 }
 
 function clear_current_login_session($conn) {
+    $userId = (int)($_SESSION['id'] ?? 0);
+    if ($userId > 0) {
+        update_user_status($conn, $userId, 'inactive');
+    }
+
     unset($_SESSION['session_token']);
 }
 
@@ -349,8 +406,9 @@ function update_user_status($conn, $userId, $status) {
     if (!in_array($status, ['active', 'inactive'], true)) {
         return false;
     }
+    ensure_user_last_seen_column($conn);
 
-    $stmt = $conn->prepare("UPDATE users SET user_status = ? WHERE user_id = ?");
+    $stmt = $conn->prepare("UPDATE users SET user_status = ?, last_seen = " . ($status === 'active' ? 'NOW()' : 'NULL') . " WHERE user_id = ?");
     if (!$stmt) {
         return false;
     }
@@ -390,17 +448,27 @@ function verify_reset_token($conn, $token) {
 }
 
 function send_email($to, $subject, $body) {
-    
+    $smtpHost = getenv('QUICKCARE_SMTP_HOST') ?: 'smtp.gmail.com';
+    $smtpUser = getenv('QUICKCARE_SMTP_USERNAME') ?: 'nshuzheng@gmail.com';
+    $smtpPass = getenv('QUICKCARE_SMTP_PASSWORD') ?: 'sepe adqn xfez jcdv';
+    $smtpFrom = getenv('QUICKCARE_SMTP_FROM') ?: $smtpUser;
+    $smtpFromName = getenv('QUICKCARE_SMTP_FROM_NAME') ?: 'QuickCare';
+
+    if ($smtpUser === '' || $smtpPass === '' || $smtpFrom === '') {
+        error_log('QuickCare email failed: SMTP environment variables are not configured.');
+        return false;
+    }
+
     $mail = new PHPMailer(true);
     try {
         $mail->isSMTP(); //use smtp (email protocol)
-        $mail->Host = 'smtp.gmail.com'; //connect to email server
+        $mail->Host = $smtpHost; //connect to email server
         $mail->SMTPAuth = true;
-        $mail->Username = 'nshuzheng@gmail.com'; //login gmail account
-        $mail->Password = 'sepe adqn xfez jcdv'; //use google app password
+        $mail->Username = $smtpUser; //login email account
+        $mail->Password = $smtpPass; //use app password
         $mail->SMTPSecure = 'tls'; // password encryption
         $mail->Port = 587; //email server port (TLS587, SSL465)
-        $mail->setFrom('nshuzheng@gmail.com', 'QuickCare'); //from QuickCare
+        $mail->setFrom($smtpFrom, $smtpFromName); //from QuickCare
         $mail->addAddress($to); //to user email
         $mail->CharSet = 'UTF-8';
         $mail->isHTML(true);
@@ -1148,7 +1216,7 @@ async function confirmRefundRequest() {
     const data = await response.json();
     if (data.success) {
         closeRefundRequestModal();
-        showPaymentHistoryNotice('Refund request submitted. Please wait for admin approval.', 'success', true);
+        window.location.href = 'payment_history.php?refund_requested=1';
     } else {
         showPaymentHistoryNotice('Error: ' + data.message, 'error');
     }
@@ -1520,14 +1588,18 @@ function render_stats($role) {
     $totalAppointments = count_appointments($conn);
     $verifyingPaymentRows = fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM payments WHERE payment_status = ?", 's', ['verifying']);
     $verifyingPayments = (int) ($verifyingPaymentRows[0]['total'] ?? 0);
-    $revenueRows = fetch_all_assoc($conn, "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_status = ?", 's', ['paid']);
+    $revenueRows = fetch_all_assoc(
+        $conn,
+        "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected')"
+    );
     $totalRevenue = (float) ($revenueRows[0]['total'] ?? 0);
-    $totalActiveUsers = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ? AND user_status = ?", 'ss', ['user', 'active'])[0]['total'] ?? 0);
+    ensure_user_last_seen_column($conn);
+    $totalActiveStaff = (int)(fetch_all_assoc($conn, "SELECT COUNT(*) AS total FROM users WHERE role = ? AND user_status = ? AND last_seen >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)", 'ss', ['staff', 'active'])[0]['total'] ?? 0);
 
     $stats = [
         'user' => [['📅','primary',$upcomingAppointments,'Upcoming Appointments',''], ['✅','success',$completedAppointments,'Completed',''], ['⏳','warning',$pendingPayments,'Pending Payment','']],
         'staff' => [['📅','primary',$todayAppointments,"Today's Appointments",''], ['✅','success',$confirmed,'Confirmed',''], ['👥','teal',$totalUsers,'Total Users','']],
-        'admin' => [['📅','primary',$totalAppointments,'Total Appointments',''], ['💰','success','RM ' . number_format($totalRevenue, 2),'Revenue',''], ['👥','teal',$totalActiveUsers,'Active Users',''], ['⏳','warning',$verifyingPayments,'Payment Verifying','']],
+        'admin' => [['📅','primary',$totalAppointments,'Total Appointments',''], ['💰','success','RM ' . number_format($totalRevenue, 2),'Revenue',''], ['👥','teal',$totalActiveStaff,'Active Staff',''], ['⏳','warning',$verifyingPayments,'Payment Verifying','']],
     ];
     echo '<div class="stats-grid">';
     foreach ($stats[$role] ?? [] as $s) {
@@ -1883,7 +1955,7 @@ function render_profile($role) {
     echo '<div class="profile-header">' . user_avatar_html($u, 'profile-avatar-lg') . '<div><div class="profile-name">' . e($u['name']) . '</div><div class="profile-meta">' . e($u['role'] . ' · ID: ' . $u['user_code']) . '</div><div style="margin-top:8px"><span class="badge badge-' . e($accountStatus) . '">• ' . e(ucfirst($accountStatus)) . '</span></div></div><button class="btn btn-outline" style="margin-left:auto" onclick="openModal(\'modal-edit-profile\')">✏️ Edit Profile</button></div>';
     echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Personal Information</span></div><div class="card-body"><div style="display:flex;flex-direction:column;gap:12px">';
     foreach ([['Full Name',$u['name']], ['Email',$u['email']], ['Phone',format_phone_number($u['phone_number'])], ['Gender',$u['gender']], ['Date of Birth',$u['date_of_birth']], ['Blood Type',$u['blood_type']]] as $row) echo '<div class="flex-between"><span class="text-muted">' . e($row[0]) . '</span><span>' . e($row[1]) . '</span></div><div class="divider"></div>';
-    echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Change Password</span></div><div class="card-body"><form method="post" action="' . e(app_url('action.php')) . '"><input type="hidden" name="action" value="change_password"><div class="form-group"><label>Current Password</label><input class="form-control" type="password" name="current_password" required></div><div class="form-group"><label>New Password</label><input class="form-control" type="password" name="new_password" required></div><div class="form-group"><label>Confirm Password</label><input class="form-control" type="password" name="confirm_password" required></div><button class="btn btn-primary" style="width:auto">Update Password</button></form></div></div></div>';
+    echo '</div></div></div><div class="card"><div class="card-header"><span class="card-title">Change Password</span></div><div class="card-body"><form method="post" action="' . e(app_url('action.php')) . '" id="profilePasswordForm"><input type="hidden" name="action" value="change_password"><div class="form-group"><label>Current Password</label><div class="password-field"><input class="form-control" type="password" name="current_password" required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false"><span class="password-toggle-eye" aria-hidden="true"></span></button></div></div><div class="form-group"><label>New Password</label><div class="password-field"><input class="form-control" type="password" name="new_password" id="profileNewPassword" required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false"><span class="password-toggle-eye" aria-hidden="true"></span></button></div><div class="password-requirements" id="profilePasswordRequirements"><div id="profile-req-length"><span class="icon">○</span> Minimum 8 characters</div><div id="profile-req-number"><span class="icon">○</span> Contains a number</div><div id="profile-req-uppercase"><span class="icon">○</span> Contains uppercase letter</div><div id="profile-req-special"><span class="icon">○</span> Contains special character</div></div></div><div class="form-group"><label>Confirm Password</label><input class="form-control" type="password" name="confirm_password" required></div><button class="btn btn-primary" style="width:auto">Update Password</button></form></div></div></div>';
 }
 
 function render_services($role, $showToolbar = true) {
@@ -3298,6 +3370,42 @@ function render_reports() {
     global $conn;
     $currentMonth = (int)date('n');
     $currentYear = (int)date('Y');
+    $selectedPeriod = $_GET['period'] ?? 'monthly';
+    if (!in_array($selectedPeriod, ['monthly', 'yearly'], true)) {
+        $selectedPeriod = 'monthly';
+    }
+    $selectedMonth = (int)($_GET['month'] ?? $currentMonth);
+    if ($selectedMonth < 1 || $selectedMonth > 12) {
+        $selectedMonth = $currentMonth;
+    }
+    $selectedYear = (int)($_GET['year'] ?? $currentYear);
+    if ($selectedYear <= 0) {
+        $selectedYear = $currentYear;
+    }
+    $appointmentWhere = '';
+    $paymentWhere = '';
+    $paymentWhereAliased = '';
+    $appointmentTypes = '';
+    $paymentTypes = '';
+    $appointmentParams = [];
+    $paymentParams = [];
+    if ($selectedPeriod === 'yearly') {
+        $appointmentWhere = ' WHERE YEAR(appointment_date) = ?';
+        $paymentWhere = ' WHERE YEAR(payment_date) = ?';
+        $paymentWhereAliased = ' WHERE YEAR(p.payment_date) = ?';
+        $appointmentTypes = 'i';
+        $paymentTypes = 'i';
+        $appointmentParams = [$selectedYear];
+        $paymentParams = [$selectedYear];
+    } else {
+        $appointmentWhere = ' WHERE MONTH(appointment_date) = ? AND YEAR(appointment_date) = ?';
+        $paymentWhere = ' WHERE MONTH(payment_date) = ? AND YEAR(payment_date) = ?';
+        $paymentWhereAliased = ' WHERE MONTH(p.payment_date) = ? AND YEAR(p.payment_date) = ?';
+        $appointmentTypes = 'ii';
+        $paymentTypes = 'ii';
+        $appointmentParams = [$selectedMonth, $selectedYear];
+        $paymentParams = [$selectedMonth, $selectedYear];
+    }
     $yearRows = fetch_all_assoc(
         $conn,
         "SELECT DISTINCT YEAR(report_date) AS report_year
@@ -3318,7 +3426,9 @@ function render_reports() {
             SUM(appointment_status IN ('confirmed', 'confirm')) AS confirmed,
             SUM(appointment_status = 'cancelled') AS cancelled,
             COALESCE(SUM(amount), 0) AS appointment_value
-         FROM appointments"
+         FROM appointments" . $appointmentWhere,
+        $appointmentTypes,
+        $appointmentParams
     )[0] ?? ['total' => 0, 'completed' => 0, 'confirmed' => 0, 'cancelled' => 0, 'appointment_value' => 0];
 
     $monthlyRows = fetch_all_assoc(
@@ -3327,47 +3437,68 @@ function render_reports() {
             DATE_FORMAT(appointment_date, '%M %Y') AS month_label,
             COUNT(*) AS total,
             SUM(appointment_status = 'completed') AS completed
-         FROM appointments
+         FROM appointments" . $appointmentWhere . "
          GROUP BY YEAR(appointment_date), MONTH(appointment_date)
-         ORDER BY YEAR(appointment_date) DESC, MONTH(appointment_date) DESC"
+         ORDER BY YEAR(appointment_date) DESC, MONTH(appointment_date) DESC",
+        $appointmentTypes,
+        $appointmentParams
     );
 
     $appointmentRows = fetch_all_assoc(
         $conn,
         "SELECT appointment_code, name, doctor_name, service_name, appointment_date, appointment_time,
                 appointment_status, payment_status, amount
-         FROM appointments
-         ORDER BY appointment_date DESC, appointment_time DESC, appointment_id DESC"
+         FROM appointments" . $appointmentWhere . "
+         ORDER BY appointment_date DESC, appointment_time DESC, appointment_id DESC",
+        $appointmentTypes,
+        $appointmentParams
     );
 
     $paymentSummary = fetch_all_assoc(
         $conn,
         "SELECT
-            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
-            SUM(payment_status IN ('paid', 'approved')) AS paid_count,
+            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected') THEN amount ELSE 0 END), 0) AS revenue,
+            SUM(payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected')) AS paid_count,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'verifying') THEN amount ELSE 0 END), 0) AS pending_amount,
             COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN amount ELSE 0 END), 0) AS refunded_amount,
             SUM(payment_status = 'refunded') AS refunded_count
-         FROM payments"
+         FROM payments" . $paymentWhere,
+        $paymentTypes,
+        $paymentParams
     )[0] ?? ['revenue' => 0, 'paid_count' => 0, 'pending_amount' => 0, 'refunded_amount' => 0, 'refunded_count' => 0];
 
     $paymentMonthlyRows = fetch_all_assoc(
         $conn,
         "SELECT
             DATE_FORMAT(payment_date, '%M %Y') AS month_label,
-            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
-            SUM(payment_status IN ('paid', 'approved')) AS invoices
-         FROM payments
+            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected') THEN amount ELSE 0 END), 0) AS revenue,
+            SUM(payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected')) AS invoices
+         FROM payments" . $paymentWhere . "
          GROUP BY YEAR(payment_date), MONTH(payment_date)
-         ORDER BY YEAR(payment_date) DESC, MONTH(payment_date) DESC"
+         ORDER BY YEAR(payment_date) DESC, MONTH(payment_date) DESC",
+        $paymentTypes,
+        $paymentParams
     );
-    $paymentRows = get_all_payments();
+    $paymentRows = fetch_all_assoc(
+        $conn,
+        "SELECT p.*,
+                u.name as patient_name,
+                a.appointment_date,
+                a.doctor_name,
+                a.service_name
+         FROM payments p
+         LEFT JOIN users u ON p.user_id = u.user_id
+         LEFT JOIN appointments a ON p.appointment_code = a.appointment_code" . $paymentWhereAliased . "
+         ORDER BY p.payment_date DESC, p.payment_id DESC",
+        $paymentTypes,
+        $paymentParams
+    );
     $completionRate = (int)($summary['total'] ?? 0) > 0 ? round(((int)($summary['completed'] ?? 0) / (int)$summary['total']) * 100) : 0;
 
     echo '<div class="report-page">';
-    echo '<div class="toolbar"><div class="report-tabs" role="tablist"><button type="button" class="report-tab active" data-report-tab="appointments">Appointment Report</button><button type="button" class="report-tab" data-report-tab="payments">Payment Report</button></div><div class="report-actions"><select class="filter-select" id="reportPeriod"><option value="monthly" selected>Monthly</option><option value="yearly">Yearly</option></select><select class="filter-select" id="reportMonth">';
+    echo '<div class="toolbar"><div class="report-tabs" role="tablist"><button type="button" class="report-tab active" data-report-tab="appointments">Appointment Report</button><button type="button" class="report-tab" data-report-tab="payments">Payment Report</button></div><div class="report-actions"><select class="filter-select" id="reportPeriod"><option value="monthly"' . ($selectedPeriod === 'monthly' ? ' selected' : '') . '>Monthly</option><option value="yearly"' . ($selectedPeriod === 'yearly' ? ' selected' : '') . '>Yearly</option></select><select class="filter-select" id="reportMonth">';
     for ($month = 1; $month <= 12; $month++) {
-        echo '<option value="' . e($month) . '"' . ($month === $currentMonth ? ' selected' : '') . '>' . e(date('F', mktime(0, 0, 0, $month, 1))) . '</option>';
+        echo '<option value="' . e($month) . '"' . ($month === $selectedMonth ? ' selected' : '') . '>' . e(date('F', mktime(0, 0, 0, $month, 1))) . '</option>';
     }
     echo '</select><select class="filter-select" id="reportYear">';
     if (empty($yearRows)) {
@@ -3375,7 +3506,7 @@ function render_reports() {
     }
     foreach ($yearRows as $row) {
         $year = (int)($row['report_year'] ?? $currentYear);
-        echo '<option value="' . e($year) . '"' . ($year === $currentYear ? ' selected' : '') . '>' . e($year) . '</option>';
+        echo '<option value="' . e($year) . '"' . ($year === $selectedYear ? ' selected' : '') . '>' . e($year) . '</option>';
     }
     echo '</select></div></div>';
 
@@ -3412,12 +3543,12 @@ function render_reports() {
     echo '<section class="report-panel" id="report-panel-payments">';
     echo '<div class="report-hero">';
     echo '<div class="report-metric"><div class="metric-label">Total Revenue</div><div class="metric-value">RM ' . e(number_format((float)($paymentSummary['revenue'] ?? 0), 2)) . '</div></div>';
-    echo '<div class="report-metric"><div class="metric-label">Paid Receipts</div><div class="metric-value">' . e((int)($paymentSummary['paid_count'] ?? 0)) . '</div></div>';
+    echo '<div class="report-metric"><div class="metric-label">Revenue Receipts</div><div class="metric-value">' . e((int)($paymentSummary['paid_count'] ?? 0)) . '</div></div>';
     echo '<div class="report-metric"><div class="metric-label">Pending Amount</div><div class="metric-value">RM ' . e(number_format((float)($paymentSummary['pending_amount'] ?? 0), 2)) . '</div></div>';
     echo '<div class="report-metric"><div class="metric-label">Refunded</div><div class="metric-value">RM ' . e(number_format((float)($paymentSummary['refunded_amount'] ?? 0), 2)) . '</div></div>';
     echo '</div>';
     echo '<div class="toolbar"><div class="search-input-wrap"><span class="search-icon">🔍</span><input class="form-control report-search" data-target="paymentReportRows" type="text" placeholder="Search payments..."></div><div class="filter-group"><select class="filter-select report-status-filter" data-target="paymentReportRows"><option value="all">All Status</option><option value="pending">Pending</option><option value="verifying">Verifying</option><option value="approved">Paid</option><option value="rejected">Rejected</option><option value="refund_requested">Refund Requested</option><option value="refunded">Refunded</option><option value="refund_rejected">Refund Rejected</option></select><a class="btn btn-sm btn-outline report-export-link" data-report-type="payments" href="' . e(action_url('export_report', ['report_type' => 'payments'])) . '">⬇ Export Payment Report</a></div></div>';
-    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Monthly Revenue Performance</span></div><div class="card-body report-table-wrap"><table><thead><tr><th>Month</th><th>Revenue</th><th>Paid Receipts</th></tr></thead><tbody>';
+    echo '<div class="grid-2"><div class="card"><div class="card-header"><span class="card-title">Monthly Revenue Performance</span></div><div class="card-body report-table-wrap"><table><thead><tr><th>Month</th><th>Revenue</th><th>Revenue Receipts</th></tr></thead><tbody>';
     if (empty($paymentMonthlyRows)) {
         echo '<tr><td colspan="3" style="text-align:center">No payment data found.</td></tr>';
     }
@@ -3463,6 +3594,18 @@ function render_reports() {
             }
             updateReportExportLinks();
         }
+        function applyReportPeriod() {
+            const params = new URLSearchParams(window.location.search);
+            const period = periodSelect?.value || "monthly";
+            params.set("period", period);
+            params.set("year", yearSelect?.value || "");
+            if (period === "monthly") {
+                params.set("month", monthSelect?.value || "");
+            } else {
+                params.delete("month");
+            }
+            window.location.href = window.location.pathname + "?" + params.toString();
+        }
         function filterReportRows(targetId) {
             const search = document.querySelector(`.report-search[data-target="${targetId}"]`)?.value.toLowerCase() || "";
             const status = document.querySelector(`.report-status-filter[data-target="${targetId}"]`)?.value || "all";
@@ -3484,9 +3627,12 @@ function render_reports() {
             control.addEventListener("input", () => filterReportRows(control.dataset.target));
             control.addEventListener("change", () => filterReportRows(control.dataset.target));
         });
-        monthSelect?.addEventListener("change", updateReportExportLinks);
-        yearSelect?.addEventListener("change", updateReportExportLinks);
-        periodSelect?.addEventListener("change", updatePeriodControls);
+        monthSelect?.addEventListener("change", applyReportPeriod);
+        yearSelect?.addEventListener("change", applyReportPeriod);
+        periodSelect?.addEventListener("change", function () {
+            updatePeriodControls();
+            applyReportPeriod();
+        });
         updatePeriodControls();
     })();
     </script>';
@@ -4076,10 +4222,61 @@ function render_modals() {
     $bloodType = $user['blood_type'] ?? '';
 
     echo <<<'HTML'
-<div class="modal-overlay" id="modal-add-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Add Staff Member</span><button class="modal-close" onclick="closeModal('modal-add-staff')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="save_staff"><input type="hidden" name="role" value="staff"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" placeholder="e.g. Nurul Ain binti Razak" required></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" placeholder="staff@QuickCare.my" required></div><div class="form-group"><label>Password</label><input class="form-control" type="password" name="password" required></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone_number" data-phone-format placeholder="+60 12-345 6789"></div><div class="form-group"><label>Role</label><input class="form-control" value="Staff" readonly></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
+<div class="modal-overlay" id="modal-add-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Add Staff Member</span><button class="modal-close" onclick="closeModal('modal-add-staff')">✕</button></div><form method="post" action="action.php" id="addStaffForm"><input type="hidden" name="action" value="save_staff"><input type="hidden" name="role" value="staff"><div class="modal-body"><div class="profile-inline-notification error" id="staffPasswordError" hidden></div><div class="form-group"><label>Full Name</label><input class="form-control" name="name" placeholder="e.g. Nurul Ain binti Razak" required></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" placeholder="staff@QuickCare.my" required></div><div class="form-group"><label>Password</label><div class="password-field"><input class="form-control" type="password" name="password" id="addStaffPassword" required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false"><span class="password-toggle-eye" aria-hidden="true"></span></button></div><div class="password-requirements" id="staffPasswordRequirements"><div id="staff-req-length"><span class="icon">○</span> Minimum 8 characters</div><div id="staff-req-number"><span class="icon">○</span> Contains a number</div><div id="staff-req-uppercase"><span class="icon">○</span> Contains uppercase letter</div><div id="staff-req-special"><span class="icon">○</span> Contains special character</div></div></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone_number" data-phone-format placeholder="+60 12-345 6789"></div><div class="form-group"><label>Role</label><input class="form-control" value="Staff" readonly></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 <div class="modal-overlay" id="modal-edit-staff"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Staff Member</span><button class="modal-close" onclick="closeModal('modal-edit-staff')">✕</button></div><form method="post" action="action.php"><input type="hidden" name="action" value="update_staff"><input type="hidden" name="id" id="editStaffId"><div class="modal-body"><div class="form-group"><label>Full Name</label><input class="form-control" name="name" id="editStaffName" required></div><div class="form-group"><label>Email</label><input class="form-control" type="email" name="email" id="editStaffEmail" required></div><div class="form-group"><label>Phone</label><input class="form-control" name="phone_number" id="editStaffPhone" data-phone-format placeholder="+60 12-345 6789"></div><div class="form-group"><label>Role</label><input class="form-control" value="Staff" readonly></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-edit-staff')">Cancel</button><button class="btn btn-primary" style="width:auto">Save Changes</button></div></form></div></div>
-<div class="modal-overlay" id="modal-add-doctor"><div class="modal"><div class="modal-header"><span class="modal-title" id="doctorModalTitle">Add Doctor</span><button class="modal-close" onclick="closeModal('modal-add-doctor')">✕</button></div><form method="post" action="action.php" enctype="multipart/form-data"><input type="hidden" name="action" value="save_doctor"><input type="hidden" name="id" id="editDoctorId" value=""><div class="modal-body"><div class="profile-upload-area"><label class="profile-upload-avatar" for="editDoctorImage"><div class="profile-avatar-lg" id="doctorImagePreview">D</div><span>Change</span></label><input class="profile-file-input" type="file" name="doctor_image" id="editDoctorImage" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted profile-upload-note">Upload a square JPG, PNG, or WEBP image. Maximum file size is 2MB.</p></div><div class="form-group"><label>Full Name</label><input class="form-control" name="name" id="editDoctorName" placeholder="e.g. Dr. Ahmad Fauzi" required></div><div class="form-group"><label>Specialization</label><input class="form-control" name="specialization" id="editDoctorSpec" required></div><div class="form-group"><label>Services Provided</label><div id="doctorServicesContainer" style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:8px; margin-top:8px;"></div></div><div class="form-group"><label>Available Days</label><div id="doctorDaysContainer" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;"><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Mon"> Mon</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Tue"> Tue</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Wed"> Wed</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Thu"> Thu</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Fri"> Fri</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sat"> Sat</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sun"> Sun</label></div></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-doctor')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
+<div class="modal-overlay" id="modal-add-doctor"><div class="modal"><div class="modal-header"><span class="modal-title" id="doctorModalTitle">Add Doctor</span><button class="modal-close" onclick="closeModal('modal-add-doctor')">✕</button></div><form method="post" action="action.php" enctype="multipart/form-data"><input type="hidden" name="action" value="save_doctor"><input type="hidden" name="id" id="editDoctorId" value=""><div class="modal-body"><div class="profile-inline-notification error" id="doctorImageError" hidden></div><div class="profile-upload-area"><label class="profile-upload-avatar" for="editDoctorImage"><div class="profile-avatar-lg" id="doctorImagePreview">D</div><span>Change</span></label><input class="profile-file-input" type="file" name="doctor_image" id="editDoctorImage" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted profile-upload-note">Upload a square JPG, PNG, or WEBP image. Maximum file size is 2MB.</p></div><div class="form-group"><label>Full Name</label><input class="form-control" name="name" id="editDoctorName" placeholder="e.g. Dr. Ahmad Fauzi" required></div><div class="form-group"><label>Specialization</label><input class="form-control" name="specialization" id="editDoctorSpec" required></div><div class="form-group"><label>Services Provided</label><div id="doctorServicesContainer" style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:8px; margin-top:8px;"></div></div><div class="form-group"><label>Available Days</label><div id="doctorDaysContainer" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;"><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Mon"> Mon</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Tue"> Tue</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Wed"> Wed</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Thu"> Thu</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Fri"> Fri</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sat"> Sat</label><label style="font-weight: 400; font-size: 0.85rem;"><input type="checkbox" name="available_days[]" value="Sun"> Sun</label></div></div></div><div class="modal-footer"><button class="btn btn-outline" type="button" onclick="closeModal('modal-add-doctor')">Cancel</button><button class="btn btn-primary" style="width:auto">Save</button></div></form></div></div>
 <script>
+const addStaffPasswordInput = document.getElementById('addStaffPassword');
+function updateStaffPasswordRequirements() {
+    if (!addStaffPasswordInput) return true;
+    const errorBox = document.getElementById('staffPasswordError');
+    if (errorBox) {
+        errorBox.hidden = true;
+        errorBox.textContent = '';
+    }
+    const password = addStaffPasswordInput.value;
+    const requirements = {
+        'staff-req-length': password.length >= 8,
+        'staff-req-number': /[0-9]/.test(password),
+        'staff-req-uppercase': /[A-Z]/.test(password),
+        'staff-req-special': /[^A-Za-z0-9]/.test(password)
+    };
+    Object.entries(requirements).forEach(function ([id, valid]) {
+        const row = document.getElementById(id);
+        const icon = row?.querySelector('.icon');
+        if (!row || !icon) return;
+        row.classList.toggle('valid', valid);
+        icon.textContent = valid ? '✓' : '○';
+    });
+    return Object.values(requirements).every(Boolean);
+}
+addStaffPasswordInput?.addEventListener('input', updateStaffPasswordRequirements);
+document.getElementById('addStaffForm')?.addEventListener('submit', function (event) {
+    if (!updateStaffPasswordRequirements()) {
+        event.preventDefault();
+        const errorBox = document.getElementById('staffPasswordError');
+        if (errorBox) {
+            errorBox.textContent = 'Password must be at least 8 characters and include a number, an uppercase letter, and a special character.';
+            errorBox.hidden = false;
+            errorBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        addStaffPasswordInput.focus();
+    }
+});
+document.querySelectorAll('#addStaffForm .password-toggle').forEach(function (button) {
+    const input = button.closest('.password-field')?.querySelector('input');
+    if (!input) return;
+    button.addEventListener('mousedown', function (event) {
+        event.preventDefault();
+    });
+    button.addEventListener('click', function () {
+        const showPassword = input.type === 'password';
+        input.type = showPassword ? 'text' : 'password';
+        button.setAttribute('aria-pressed', showPassword ? 'true' : 'false');
+        button.setAttribute('aria-label', showPassword ? 'Hide password' : 'Show password');
+        input.focus();
+    });
+});
 function setupDoctorScheduleInputs() {
     const container = document.getElementById('doctorDaysContainer');
     if (!container || document.getElementById('doctorScheduleTimeGroup')) return;
@@ -4151,6 +4348,11 @@ function applyDoctorScheduleData(scheduleData) {
 }
 function openAddDoctorModal() {
     document.getElementById('doctorModalTitle').textContent = 'Add Doctor';
+    const errorBox = document.getElementById('doctorImageError');
+    if (errorBox) {
+        errorBox.hidden = true;
+        errorBox.textContent = '';
+    }
     document.getElementById('editDoctorId').value = '';
     document.getElementById('editDoctorName').value = '';
     document.getElementById('editDoctorSpec').value = '';
@@ -4162,6 +4364,11 @@ function openAddDoctorModal() {
 }
 function openEditDoctorModal(event, btn) {
     event.stopPropagation();
+    const errorBox = document.getElementById('doctorImageError');
+    if (errorBox) {
+        errorBox.hidden = true;
+        errorBox.textContent = '';
+    }
     document.getElementById('doctorModalTitle').textContent = 'Edit Doctor';
     document.getElementById('editDoctorId').value = btn.dataset.id;
     document.getElementById('editDoctorName').value = btn.dataset.name;
@@ -4178,6 +4385,20 @@ function openEditDoctorModal(event, btn) {
 document.getElementById('editDoctorImage')?.addEventListener('change', function () {
     const file = this.files?.[0];
     if (!file) return;
+    const errorBox = document.getElementById('doctorImageError');
+    if (file.size > 2 * 1024 * 1024) {
+        this.value = '';
+        if (errorBox) {
+            errorBox.textContent = 'Doctor photo must be 2MB or smaller.';
+            errorBox.hidden = false;
+            errorBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        return;
+    }
+    if (errorBox) {
+        errorBox.hidden = true;
+        errorBox.textContent = '';
+    }
     const reader = new FileReader();
     reader.onload = function (event) {
         setDoctorImagePreview(event.target.result, 'D');
@@ -4308,7 +4529,7 @@ HTML;
         });
     });
     </script>';
-    echo '<div class="modal-overlay" id="modal-edit-profile" data-static-modal="true"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Profile</span><button class="modal-close" onclick="closeModal(\'modal-edit-profile\')">✕</button></div><form method="post" action="' . e(app_url('action.php')) . '" enctype="multipart/form-data"><input type="hidden" name="action" value="save_profile"><div class="modal-body">';
+    echo '<div class="modal-overlay" id="modal-edit-profile" data-static-modal="true"><div class="modal"><div class="modal-header"><span class="modal-title">Edit Profile</span><button class="modal-close" onclick="closeModal(\'modal-edit-profile\')">✕</button></div><form method="post" action="' . e(app_url('action.php')) . '" enctype="multipart/form-data"><input type="hidden" name="action" value="save_profile"><div class="modal-body"><div class="profile-inline-notification error" id="profileImageError" hidden></div>';
     $hasProfileImage = !empty($user['profile_image']);
     echo '<div class="profile-upload-area"><label class="profile-upload-avatar" for="profileImage">' . str_replace('class="profile-avatar-lg', 'id="profileImagePreview" class="profile-avatar-lg', user_avatar_html($user, 'profile-avatar-lg')) . '<span>Change</span></label><input class="profile-file-input" id="profileImage" type="file" name="profile_image" accept=".jpg,.jpeg,.png,.webp"><p class="text-muted profile-upload-note">Upload a square JPG, PNG, or WEBP image. Maximum file size is 2MB.</p>';
     echo '<input type="hidden" name="delete_profile_image" id="deleteProfileImage" value="0"><button class="profile-delete-photo" type="button" id="deleteProfileImageButton" aria-pressed="false"' . ($hasProfileImage ? '' : ' hidden') . '>Delete current photo</button>';
@@ -4335,6 +4556,20 @@ HTML;
     document.getElementById("profileImage")?.addEventListener("change", function () {
         const file = this.files && this.files[0];
         if (!file) return;
+        const errorBox = document.getElementById("profileImageError");
+        if (file.size > 2 * 1024 * 1024) {
+            this.value = "";
+            if (errorBox) {
+                errorBox.textContent = "Profile avatar must be 2MB or smaller.";
+                errorBox.hidden = false;
+                errorBox.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            }
+            return;
+        }
+        if (errorBox) {
+            errorBox.hidden = true;
+            errorBox.textContent = "";
+        }
         const deleteInput = document.getElementById("deleteProfileImage");
         const deleteButton = document.getElementById("deleteProfileImageButton");
         if (deleteInput) {
@@ -4369,6 +4604,46 @@ HTML;
         preview.innerHTML = "";
         preview.textContent = "' . e($profileInitials) . '";
     });
+    const profilePasswordInput = document.getElementById("profileNewPassword");
+    function updateProfilePasswordRequirements() {
+        if (!profilePasswordInput) return true;
+        const password = profilePasswordInput.value;
+        const requirements = {
+            "profile-req-length": password.length >= 8,
+            "profile-req-number": /[0-9]/.test(password),
+            "profile-req-uppercase": /[A-Z]/.test(password),
+            "profile-req-special": /[^A-Za-z0-9]/.test(password)
+        };
+        Object.entries(requirements).forEach(function ([id, valid]) {
+            const row = document.getElementById(id);
+            const icon = row?.querySelector(".icon");
+            if (!row || !icon) return;
+            row.classList.toggle("valid", valid);
+            icon.textContent = valid ? "✓" : "○";
+        });
+        return Object.values(requirements).every(Boolean);
+    }
+    profilePasswordInput?.addEventListener("input", updateProfilePasswordRequirements);
+    document.getElementById("profilePasswordForm")?.addEventListener("submit", function (event) {
+        if (!updateProfilePasswordRequirements()) {
+            event.preventDefault();
+            profilePasswordInput.focus();
+        }
+    });
+    document.querySelectorAll("#profilePasswordForm .password-toggle").forEach(function (button) {
+        const input = button.closest(".password-field")?.querySelector("input");
+        if (!input) return;
+        button.addEventListener("mousedown", function (event) {
+            event.preventDefault();
+        });
+        button.addEventListener("click", function () {
+            const showPassword = input.type === "password";
+            input.type = showPassword ? "text" : "password";
+            button.setAttribute("aria-pressed", showPassword ? "true" : "false");
+            button.setAttribute("aria-label", showPassword ? "Hide password" : "Show password");
+            input.focus();
+        });
+    });
     </script>';
 }
 
@@ -4379,22 +4654,13 @@ HTML;
 // Get user's pending payments (confirmed appointments with pending/rejected payment status)
 function get_user_pending_payments($user_id) {
     global $conn;
-    
-    // First get user name from users table
-    $stmt = $conn->prepare("SELECT name FROM users WHERE user_id = ?");
-    $stmt->bind_param("i", $user_id);
-    $stmt->execute();
-    $user = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    
-    $user_name = $user['name'] ?? '';
-    
+
     $query = "SELECT a.*, 
               a.doctor_name, 
               a.service_name, 
               a.amount 
               FROM appointments a
-              WHERE a.name = ?
+              WHERE a.user_id = ?
               AND a.appointment_status IN ('confirm', 'confirmed')
               AND a.payment_status IN ('pending', 'rejected', 'failed')
               AND NOT EXISTS (
@@ -4404,7 +4670,7 @@ function get_user_pending_payments($user_id) {
               )";
     
     $stmt = $conn->prepare($query);
-    $stmt->bind_param("s", $user_name);
+    $stmt->bind_param("i", $user_id);
     $stmt->execute();
     $result = $stmt->get_result();
     
@@ -4441,7 +4707,8 @@ function get_user_payment_history($user_id) {
               FROM payments p
               LEFT JOIN appointments a ON p.appointment_code = a.appointment_code
               WHERE p.user_id = ?
-              ORDER BY p.payment_date DESC";
+              ORDER BY CASE WHEN p.payment_status = 'refund_requested' THEN 0 ELSE 1 END,
+                       p.payment_date DESC";
     
     $stmt = $conn->prepare($query);
     $stmt->bind_param("i", $user_id);
@@ -4628,11 +4895,11 @@ function submit_payment($user_id, $appointment_code, $amount, $transaction_id, $
         ");
         $stmt->bind_param("ssi", $payment_status, $appointment_code, $user_id);
         $stmt->execute();
-        $updated = $stmt->affected_rows;
+        $updateError = $stmt->errno ? $stmt->error : '';
         $stmt->close();
 
-        if ($updated <= 0) {
-            throw new Exception('Appointment payment status changed');
+        if ($updateError !== '') {
+            throw new Exception('Appointment payment status update failed: ' . $updateError);
         }
 
         $conn->commit();

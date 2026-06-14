@@ -15,7 +15,7 @@ if ($action === 'register') {
         $raw_password = $_POST['password'] ?? '';
 
         // Validate password criteria
-        if (strlen($raw_password) < 8 || !preg_match('/[0-9]/', $raw_password) || !preg_match('/[A-Z]/', $raw_password) || !preg_match('/[^A-Za-z0-9]/', $raw_password)) {
+        if (!password_meets_criteria($raw_password)) {
             $_SESSION['QuickCare_message'] = "Password must be at least 8 characters and include a number, an uppercase letter, and a special character.";
             $_SESSION['QuickCare_message_type'] = "error";
             redirect_to('register.php');
@@ -137,6 +137,13 @@ if ($action === 'reset_password') {
             $_SESSION['QuickCare_message'] = "Invalid or expired reset link.";
             $_SESSION['QuickCare_message_type'] = "error";
             redirect_to('forgot_password.php');
+            exit();
+        }
+
+        if (!password_meets_criteria($new_password)) {
+            $_SESSION['QuickCare_message'] = "Password must be at least 8 characters and include a number, an uppercase letter, and a special character.";
+            $_SESSION['QuickCare_message_type'] = "error";
+            redirect_to('reset_password.php?token=' . $token);
             exit();
         }
 
@@ -628,6 +635,12 @@ if ($action === 'change_password' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect_to($back);
     }
 
+    if (!password_meets_criteria($newPassword)) {
+        $_SESSION['QuickCare_message'] = "Password must be at least 8 characters and include a number, an uppercase letter, and a special character.";
+        $_SESSION['QuickCare_message_type'] = "error";
+        redirect_to($back);
+    }
+
     if ($newPassword !== $confirmPassword) {
         $_SESSION['QuickCare_message'] = "New password and confirm password do not match.";
         $_SESSION['QuickCare_message_type'] = "error";
@@ -748,6 +761,12 @@ if ($action === 'save_staff' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($name === '' || $email === '' || $password === '') {
         $_SESSION['QuickCare_message'] = 'Please fill in staff name, email, and password.';
+        $_SESSION['QuickCare_message_type'] = 'error';
+        redirect_to($back);
+    }
+
+    if (!password_meets_criteria($password)) {
+        $_SESSION['QuickCare_message'] = "Password must be at least 8 characters and include a number, an uppercase letter, and a special character.";
         $_SESSION['QuickCare_message_type'] = 'error';
         redirect_to($back);
     }
@@ -1283,6 +1302,7 @@ if ($action === 'export_report') {
     }
     $appointmentWhere = '';
     $paymentWhere = '';
+    $paymentWhereAliased = '';
     $filterTypes = '';
     $appointmentParams = [];
     $paymentParams = [];
@@ -1291,6 +1311,7 @@ if ($action === 'export_report') {
     if ($selectedPeriod === 'yearly' && $selectedYear > 0) {
         $appointmentWhere = ' WHERE YEAR(appointment_date) = ?';
         $paymentWhere = ' WHERE YEAR(payment_date) = ?';
+        $paymentWhereAliased = ' WHERE YEAR(p.payment_date) = ?';
         $filterTypes = 'i';
         $appointmentParams = [$selectedYear];
         $paymentParams = [$selectedYear];
@@ -1298,6 +1319,7 @@ if ($action === 'export_report') {
     } elseif ($selectedMonth >= 1 && $selectedMonth <= 12 && $selectedYear > 0) {
         $appointmentWhere = ' WHERE MONTH(appointment_date) = ? AND YEAR(appointment_date) = ?';
         $paymentWhere = ' WHERE MONTH(payment_date) = ? AND YEAR(payment_date) = ?';
+        $paymentWhereAliased = ' WHERE MONTH(p.payment_date) = ? AND YEAR(p.payment_date) = ?';
         $filterTypes = 'ii';
         $appointmentParams = [$selectedMonth, $selectedYear];
         $paymentParams = [$selectedMonth, $selectedYear];
@@ -1339,8 +1361,8 @@ if ($action === 'export_report') {
     $paymentSummary = fetch_all_assoc(
         $conn,
         "SELECT
-            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
-            SUM(payment_status IN ('paid', 'approved')) AS paid_count,
+            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected') THEN amount ELSE 0 END), 0) AS revenue,
+            SUM(payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected')) AS paid_count,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'verifying') THEN amount ELSE 0 END), 0) AS pending_amount
          FROM payments" . $paymentWhere,
         $filterTypes,
@@ -1350,8 +1372,8 @@ if ($action === 'export_report') {
         $conn,
         "SELECT
             DATE_FORMAT(payment_date, '%M %Y') AS month_label,
-            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved') THEN amount ELSE 0 END), 0) AS revenue,
-            SUM(payment_status IN ('paid', 'approved')) AS invoices
+            COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected') THEN amount ELSE 0 END), 0) AS revenue,
+            SUM(payment_status IN ('paid', 'approved', 'refund_requested', 'refund_rejected')) AS invoices
          FROM payments" . $paymentWhere . "
          GROUP BY YEAR(payment_date), MONTH(payment_date)
          ORDER BY YEAR(payment_date) DESC, MONTH(payment_date) DESC",
@@ -1363,7 +1385,7 @@ if ($action === 'export_report') {
         "SELECT p.receipt_number, p.payment_date, p.amount, p.transaction_id, p.payment_status,
                 COALESCE(u.name, '-') AS patient_name, p.appointment_code
          FROM payments p
-         LEFT JOIN users u ON p.user_id = u.user_id" . $paymentWhere . "
+         LEFT JOIN users u ON p.user_id = u.user_id" . $paymentWhereAliased . "
          ORDER BY p.payment_date DESC, p.payment_id DESC",
         $filterTypes,
         $paymentParams
@@ -1429,12 +1451,12 @@ if ($action === 'export_report') {
         $content .= $sectionTitle('Payment Summary', $y);
         $y -= 28;
         $content .= $summaryCard(42, $y, 160, 'Total Revenue', 'RM ' . number_format((float)($paymentSummary['revenue'] ?? 0), 2));
-        $content .= $summaryCard(218, $y, 150, 'Paid Receipts', (string)(int)($paymentSummary['paid_count'] ?? 0));
+        $content .= $summaryCard(218, $y, 150, 'Revenue Receipts', (string)(int)($paymentSummary['paid_count'] ?? 0));
         $content .= $summaryCard(384, $y, 169, 'Pending Amount', 'RM ' . number_format((float)($paymentSummary['pending_amount'] ?? 0), 2));
         $y -= 88;
         $content .= $sectionTitle('Monthly Revenue Performance', $y);
         $y -= 24;
-        $content .= $tableHeader($y, [[60, 'Month'], [245, 'Revenue'], [390, 'Paid Receipts']]);
+        $content .= $tableHeader($y, [[60, 'Month'], [245, 'Revenue'], [390, 'Revenue Receipts']]);
         $y -= 28;
         foreach ($paymentMonthlyRows as $row) {
             $content .= $pdfText(60, $y, $row['month_label'] ?? '', 9);

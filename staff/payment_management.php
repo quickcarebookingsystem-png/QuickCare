@@ -70,9 +70,9 @@ $payments = get_all_payments();
                             $paymentGroup = 'refund_rejected';
                         }
                         $refundReceiptFile = payment_refund_receipt_file($payment['remarks'] ?? '');
-                        $receiptToView = ($paymentStatus === 'refunded' && $refundReceiptFile !== '')
-                            ? $refundReceiptFile
-                            : ($payment['receipt_image'] ?? '');
+                        $isRefundProofStatus = $paymentStatus === 'refunded';
+                        $proofToView = $isRefundProofStatus ? $refundReceiptFile : ($payment['receipt_image'] ?? '');
+                        $proofTitle = $isRefundProofStatus ? 'Refund Proof' : 'Payment Proof';
                         $hasOfficialReceipt = in_array($paymentStatus, ['paid', 'approved', 'refund_requested', 'refund_rejected', 'refunded'], true);
                         $referenceValue = $hasOfficialReceipt && trim((string)($payment['receipt_number'] ?? '')) !== ''
                             ? $payment['receipt_number']
@@ -88,8 +88,8 @@ $payments = get_all_payments();
                             <?php echo badge($badgeStatus); ?>
                         </td>
                         <td>
-                            <?php if (!empty($receiptToView)): ?>
-                                <button class="btn-view" onclick='viewReceipt(<?php echo json_encode($receiptToView); ?>)'>
+                            <?php if (!empty($proofToView)): ?>
+                                <button class="btn-view" onclick='viewReceipt(<?php echo json_encode($proofToView); ?>, <?php echo json_encode($proofTitle); ?>)'>
                                     📷 View
                                 </button>
                             <?php else: ?>
@@ -186,20 +186,23 @@ function initPaymentFilter() {
 
 initPaymentFilter();
 
-function viewReceipt(receiptImage) {
+function viewReceipt(receiptImage, proofTitle = 'Payment Proof') {
     if (!receiptImage) {
-        alert('No receipt image available');
+        alert('No proof file available');
         return;
     }
     const modal = document.getElementById('receiptViewModal');
     const content = document.getElementById('receiptPreviewContent');
+    const modalTitle = document.querySelector('#receiptViewModal .modal-title');
+    const safeProofTitle = proofTitle || 'Payment Proof';
+    if (modalTitle) modalTitle.textContent = 'Proof: ' + safeProofTitle;
     const receiptUrl = '../uploads/receipts/' + encodeURIComponent(receiptImage);
     const extension = receiptImage.split('.').pop().toLowerCase();
     if (content) {
         if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) {
-            content.innerHTML = `<img src="${receiptUrl}" alt="Payment receipt">`;
+            content.innerHTML = `<img src="${receiptUrl}" alt="${safeProofTitle}">`;
         } else {
-            content.innerHTML = `<div class="file-open-fallback"><p>This payment proof file cannot be previewed here.</p><a class="btn btn-outline" target="_blank" rel="noopener" href="${receiptUrl}">Open File</a></div>`;
+            content.innerHTML = `<div class="file-open-fallback"><p>This ${safeProofTitle.toLowerCase()} file cannot be previewed here.</p><a class="btn btn-outline" target="_blank" rel="noopener" href="${receiptUrl}">Open File</a></div>`;
         }
     }
     modal.style.display = 'flex';

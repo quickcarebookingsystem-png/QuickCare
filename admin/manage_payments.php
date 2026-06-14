@@ -40,7 +40,7 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
             <div class="stat-info">
                 <span class="stat-value">RM <?php 
                     $total = array_sum(array_column(array_filter($all_payments, function($p) { 
-                        return in_array($p['payment_status'], ['approved', 'paid'], true);
+                        return in_array($p['payment_status'], ['approved', 'paid', 'refund_requested', 'refund_rejected'], true);
                     }), 'amount'));
                     echo number_format($total, 2);
                 ?></span>
@@ -122,9 +122,9 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                         }
                         $badgeStatus = $paymentStatus === 'approved' ? 'paid' : str_replace('_', '-', $paymentStatus);
                         $refundReceiptFile = payment_refund_receipt_file($payment['remarks'] ?? '');
-                        $receiptToView = ($paymentStatus === 'refunded' && $refundReceiptFile !== '')
-                            ? $refundReceiptFile
-                            : ($payment['receipt_image'] ?? '');
+                        $isRefundProofStatus = $paymentStatus === 'refunded';
+                        $proofToView = $isRefundProofStatus ? $refundReceiptFile : ($payment['receipt_image'] ?? '');
+                        $proofTitle = $isRefundProofStatus ? 'Refund Proof' : 'Payment Proof';
                         $refundNote = payment_note_display($paymentStatus, $payment['remarks'] ?? '');
                         $refundNoteText = $refundNote['text'] ?? '';
                         $paymentMethodText = payment_method_from_payment($payment);
@@ -144,8 +144,8 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
                         <td>RM <?php echo number_format($payment['amount'], 2); ?></td>
                         <td><?php echo badge($badgeStatus); ?></td>
                         <td>
-                            <?php if (!empty($receiptToView)): ?>
-                                <button class="btn-view" onclick='viewReceipt(<?php echo json_encode($receiptToView); ?>, <?php echo json_encode($refundNoteText); ?>, <?php echo json_encode($paymentMethodText); ?>)'>
+                            <?php if (!empty($proofToView)): ?>
+                                <button class="btn-view" onclick='viewReceipt(<?php echo json_encode($proofToView); ?>, <?php echo json_encode($refundNoteText); ?>, <?php echo json_encode($isRefundProofStatus ? '' : $paymentMethodText); ?>, <?php echo json_encode($proofTitle); ?>)'>
                                     View
                                 </button>
                             <?php else: ?>
@@ -201,7 +201,7 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
 <div id="receiptViewModal" class="modal-overlay" style="display: none;">
     <div class="modal">
         <div class="modal-header">
-            <span class="modal-title">Payment Receipt</span>
+            <span class="modal-title" id="receiptViewModalTitle">Payment Proof</span>
             <button class="modal-close" onclick="closeReceiptViewModal()">✕</button>
         </div>
         <div class="modal-body" style="text-align: center;">
@@ -257,6 +257,7 @@ $admin_queue_count = count(array_filter($all_payments, function($p) {
             <button class="modal-close" onclick="closeRefundModal()">X</button>
         </div>
         <div class="modal-body">
+            <div class="profile-inline-notification error" id="refundReceiptError" hidden></div>
             <p>Approve this refund request? The user will receive an email notification.</p>
             <div class="form-group refund-upload-group">
                 <label for="refundReceipt">Upload Receipt/Screenshot</label>
@@ -384,22 +385,25 @@ function closePaymentDetailsModal() {
     document.getElementById('paymentDetailsModal').style.display = 'none';
 }
 
-function viewReceipt(receiptImage, reason = '', paymentMethod = '') {
+function viewReceipt(receiptImage, reason = '', paymentMethod = '', proofTitle = 'Payment Proof') {
     if (!receiptImage) {
-        alert('No receipt image available');
+        alert('No proof file available');
         return;
     }
     const modal = document.getElementById('receiptViewModal');
     const content = document.getElementById('receiptPreviewContent');
     const reasonBox = document.getElementById('receiptRefundReasonBox');
     const paymentMethodBox = document.getElementById('receiptPaymentMethodBox');
+    const modalTitle = document.getElementById('receiptViewModalTitle');
+    const safeProofTitle = proofTitle || 'Payment Proof';
+    if (modalTitle) modalTitle.textContent = safeProofTitle;
     const receiptUrl = '../uploads/receipts/' + encodeURIComponent(receiptImage);
     const extension = receiptImage.split('.').pop().toLowerCase();
     if (content) {
         if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension)) {
-            content.innerHTML = `<img src="${receiptUrl}" alt="Payment receipt">`;
+            content.innerHTML = `<img src="${receiptUrl}" alt="${safeProofTitle}">`;
         } else {
-            content.innerHTML = `<div class="file-open-fallback"><p>This payment proof file cannot be previewed here.</p><a class="btn btn-outline" target="_blank" rel="noopener" href="${receiptUrl}">Open File</a></div>`;
+            content.innerHTML = `<div class="file-open-fallback"><p>This ${safeProofTitle.toLowerCase()} file cannot be previewed here.</p><a class="btn btn-outline" target="_blank" rel="noopener" href="${receiptUrl}">Open File</a></div>`;
         }
     }
     if (paymentMethodBox) {
@@ -489,6 +493,11 @@ function formatRefundRequestReason(reason) {
 function showRefundModal(paymentId, reason = '') {
     refundPaymentId = paymentId;
     document.getElementById('refundReceipt').value = '';
+    const errorBox = document.getElementById('refundReceiptError');
+    if (errorBox) {
+        errorBox.hidden = true;
+        errorBox.textContent = '';
+    }
     document.getElementById('refundModal').style.display = 'flex';
 }
 
@@ -501,6 +510,7 @@ function confirmRefund() {
     const reason = '';
     const receiptInput = document.getElementById('refundReceipt');
     const receiptFile = receiptInput.files[0];
+    const errorBox = document.getElementById('refundReceiptError');
 
     if (!receiptFile) {
         alert('Please upload refund receipt or screenshot');
@@ -508,7 +518,12 @@ function confirmRefund() {
     }
 
     if (receiptFile.size > 2 * 1024 * 1024) {
-        alert('File too large. Max 2MB');
+        if (errorBox) {
+            errorBox.textContent = 'Refund proof must be 2MB or smaller.';
+            errorBox.hidden = false;
+            errorBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        receiptInput.value = '';
         return;
     }
 
@@ -538,6 +553,25 @@ function confirmRefund() {
         }
     });
 }
+
+document.getElementById('refundReceipt')?.addEventListener('change', function () {
+    const file = this.files?.[0];
+    const errorBox = document.getElementById('refundReceiptError');
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+        this.value = '';
+        if (errorBox) {
+            errorBox.textContent = 'Refund proof must be 2MB or smaller.';
+            errorBox.hidden = false;
+            errorBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        return;
+    }
+    if (errorBox) {
+        errorBox.hidden = true;
+        errorBox.textContent = '';
+    }
+});
 
 let rejectRefundPaymentId = null;
 

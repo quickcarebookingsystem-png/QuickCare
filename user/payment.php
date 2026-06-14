@@ -115,6 +115,7 @@ $selected_appointment = $_GET['appointment'] ?? '';
                     <input type="hidden" id="appointmentCode" name="appointment_code">
                     <input type="hidden" id="amount" name="amount">
                     <input type="hidden" id="paymentMethodLabel" name="payment_method_label">
+                    <div class="profile-inline-notification error" id="receiptSizeError" hidden></div>
 
                     <div class="payment-summary-card">
                         <div class="payment-summary-top">
@@ -230,6 +231,9 @@ function setPaymentMethod(method) {
             ? 'After payment, please upload the receipt below for verification.'
             : 'You will be redirected to ToyyibPay to complete FPX payment.';
     }
+    if (!isQr) {
+        clearReceiptSizeError();
+    }
 
     document.querySelectorAll('.payment-method-tab').forEach(tab => {
         const active = tab.dataset.paymentMethod === selectedPaymentMethod;
@@ -325,13 +329,54 @@ function showPaymentNotice(message, type = 'success', redirectUrl = '') {
     }, 5000);
 }
 
+function showReceiptSizeError(message) {
+    const errorBox = document.getElementById('receiptSizeError');
+    if (!errorBox) return;
+    errorBox.textContent = message;
+    errorBox.hidden = false;
+    errorBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function clearReceiptSizeError() {
+    const errorBox = document.getElementById('receiptSizeError');
+    if (!errorBox) return;
+    errorBox.textContent = '';
+    errorBox.hidden = true;
+}
+
+function validateReceiptSizeImmediately(clearWhenEmpty = true) {
+    const receiptInput = document.getElementById('receipt');
+    const receiptFile = receiptInput?.files?.[0];
+    const maxReceiptSize = 2 * 1024 * 1024;
+
+    if (!receiptInput || !receiptFile) {
+        if (clearWhenEmpty) {
+            clearReceiptSizeError();
+        }
+        return true;
+    }
+
+    if (receiptFile.size > maxReceiptSize) {
+        receiptInput.value = '';
+        showReceiptSizeError('Receipt file is too large. Please upload a file 2MB or smaller.');
+        return false;
+    }
+
+    clearReceiptSizeError();
+    return true;
+}
+
 // Handle form submission
 document.getElementById('paymentForm')?.addEventListener('submit', async function(e) {
     e.preventDefault();
 
     const receiptInput = document.getElementById('receipt');
+    if (!validateReceiptSizeImmediately(false)) {
+        receiptInput.focus();
+        return;
+    }
+
     const receiptFile = receiptInput.files[0];
-    const maxReceiptSize = 2 * 1024 * 1024;
     const methodLabel = document.getElementById('paymentMethodLabel').value;
 
     if (selectedPaymentMethod === 'fpx') {
@@ -365,11 +410,6 @@ document.getElementById('paymentForm')?.addEventListener('submit', async functio
         return;
     }
 
-    if (receiptFile && receiptFile.size > maxReceiptSize) {
-        showPaymentNotice('Receipt file is too large. Please upload a file 2MB or smaller.', 'error');
-        receiptInput.focus();
-        return;
-    }
     if (!receiptFile) {
         showPaymentNotice('Please upload payment receipt.', 'error');
         receiptInput.focus();
@@ -430,6 +470,7 @@ document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.qr-type-tab').forEach(tab => {
         tab.addEventListener('click', () => setQrType(tab.dataset.qrType || 'bank'));
     });
+    document.getElementById('receipt')?.addEventListener('change', validateReceiptSizeImmediately);
     setPaymentMethod('fpx');
     setQrType('tng');
 

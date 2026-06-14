@@ -1248,6 +1248,22 @@ tbody td { padding: 12px 16px; color: var(--text); }
   max-width: 320px;
   text-align: center;
 }
+.profile-inline-notification {
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.profile-inline-notification.error {
+  background: rgba(166, 42, 42, 0.12);
+  border: 1px solid rgba(166, 42, 42, 0.22);
+  color: var(--danger);
+}
+.profile-inline-notification[hidden] {
+  display: none;
+}
 .profile-delete-photo {
   display: inline-flex;
   align-items: center;
@@ -1269,6 +1285,28 @@ tbody td { padding: 12px 16px; color: var(--text); }
 .profile-delete-photo.active {
   background: rgba(176,48,48,0.08);
   border-color: rgba(176,48,48,0.18);
+}
+.password-requirements {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+}
+.password-requirements div {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.password-requirements div:last-child {
+  margin-bottom: 0;
+}
+.password-requirements div.valid {
+  color: var(--success);
+}
+.password-requirements .icon {
+  display: inline-block;
+  width: 16px;
 }
 .profile-name { font-size: 1.3rem; font-family: 'DM Serif Display', serif; }
 .profile-meta { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
@@ -3429,6 +3467,14 @@ body.role-admin.page-payment .payments-table td:nth-child(8) {
     white-space: nowrap;
 }
 
+body.role-admin.page-payment .payments-table td:nth-child(6) .badge-refund-requested,
+body.role-admin.page-payment .payments-table td:nth-child(6) .badge-refund-rejected {
+    width: 78px;
+    padding: 6px 8px;
+    line-height: 1.15;
+    white-space: normal;
+}
+
 body.role-admin.page-payment .payments-table td:nth-child(2),
 
 
@@ -3690,6 +3736,11 @@ body.role-admin.page-payment .form-control {
     font-size: 14px;
     background: var(--surface);
     color: var(--text);
+}
+
+body.role-admin.page-payment .search-input-wrap .form-control,
+body.role-staff.page-payment .search-input-wrap .form-control {
+    padding-left: 40px;
 }
 
 body.role-admin.page-payment .form-control:focus {
