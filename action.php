@@ -147,6 +147,13 @@ if ($action === 'reset_password') {
             exit();
         }
 
+        if (password_verify($new_password, $user['password'])) {
+            $_SESSION['QuickCare_message'] = "New password cannot be the same as your current password.";
+            $_SESSION['QuickCare_message_type'] = "error";
+            redirect_to('reset_password.php?token=' . $token);
+            exit();
+        }
+
         if ($new_password !== $confirm_password) {
             $_SESSION['QuickCare_message'] = "Passwords do not match.";
             $_SESSION['QuickCare_message_type'] = "error";

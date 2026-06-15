@@ -1,5 +1,18 @@
 <?php
 require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/db_connect.php';
+
+header("Cache-Control: no-cache, no-store, must-revalidate");
+header("Pragma: no-cache");
+header("Expires: 0");
+
+$token = $_GET['token'] ?? '';
+if (!verify_reset_token($conn, $token)) {
+    $_SESSION['QuickCare_message'] = "This reset link is invalid or has already been used. Please request a new reset link.";
+    $_SESSION['QuickCare_message_type'] = "error";
+    redirect_to('login.php');
+}
+
 app_header('QuickCare - Reset Password');
 ?>
 <body>
@@ -14,7 +27,7 @@ app_header('QuickCare - Reset Password');
     <?php render_notification('auth'); ?>
     <form method="post" action="<?php echo e(app_url('action.php')); ?>" id="resetPasswordForm">
       <input type="hidden" name="action" value="reset_password">
-      <input type="hidden" name="token" value="<?php echo e($_GET['token'] ?? ''); ?>">
+      <input type="hidden" name="token" value="<?php echo e($token); ?>">
       <div class="form-group">
         <label>New Password</label>
         <div class="password-field">
