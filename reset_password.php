@@ -83,6 +83,11 @@ document.getElementById('resetPasswordForm')?.addEventListener('submit', functio
     event.preventDefault();
     document.getElementById('js-notification-area').innerHTML = '<div class="auth-notification error">Your password does not meet all the required criteria. Please check the requirements list and try again.</div>';
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+
+  if (window.history && window.history.replaceState) {
+    window.history.replaceState(null, '', <?php echo json_encode(app_url('login.php')); ?>);
   }
 });
 

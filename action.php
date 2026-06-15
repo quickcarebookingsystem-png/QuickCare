@@ -136,7 +136,7 @@ if ($action === 'reset_password') {
         if (!$user) {
             $_SESSION['QuickCare_message'] = "Invalid or expired reset link.";
             $_SESSION['QuickCare_message_type'] = "error";
-            redirect_to('forgot_password.php');
+            redirect_to('login.php');
             exit();
         }
 
